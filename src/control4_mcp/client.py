@@ -79,23 +79,40 @@ class Control4Connection:
             connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._session = aiohttp.ClientSession(connector=connector)
 
-        account = C4Account(
-            self._settings.account_email,
-            self._settings.account_password,
-            self._session,
-        )
-        await account.get_account_bearer_token()
+        # Control4's cloud auth endpoint occasionally disconnects mid-handshake.
+        # Retry on transient network errors; real auth failures bubble up.
+        async def _cloud_auth() -> tuple[str, int]:
+            account = C4Account(
+                self._settings.account_email,
+                self._settings.account_password,
+                self._session,
+            )
+            await account.get_account_bearer_token()
 
-        common_name = self._settings.controller_common_name
-        if not common_name:
-            controllers = await account.get_account_controllers()
-            common_name = controllers["controllerCommonName"]
-            log.info("Auto-selected controller: %s", common_name)
+            common_name = self._settings.controller_common_name
+            if not common_name:
+                controllers = await account.get_account_controllers()
+                common_name = controllers["controllerCommonName"]
+                log.info("Auto-selected controller: %s", common_name)
 
-        token_payload = await account.get_director_bearer_token(common_name)
-        self._director_token = token_payload["token"]
-        valid_seconds = int(token_payload.get("validSeconds", 86400))
+            payload = await account.get_director_bearer_token(common_name)
+            return payload["token"], int(payload.get("validSeconds", 86400))
 
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                token, valid_seconds = await _cloud_auth()
+                break
+            except (aiohttp.ClientConnectionError, aiohttp.ServerDisconnectedError) as e:
+                last_err = e
+                delay = 0.5 * (2**attempt)
+                log.warning("Cloud auth attempt %d failed (%s); retrying in %.1fs", attempt + 1, e, delay)
+                await asyncio.sleep(delay)
+        else:
+            assert last_err is not None
+            raise last_err
+
+        self._director_token = token
         self._director = C4Director(
             self._settings.director_ip,
             self._director_token,

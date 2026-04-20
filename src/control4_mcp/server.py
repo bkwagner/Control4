@@ -211,6 +211,126 @@ async def send_command(
 
 
 # ---------------------------------------------------------------------------
+# Audio / Video tools (room-level playback, volume, source routing)
+# ---------------------------------------------------------------------------
+
+# Proxies that represent selectable media sources in Control4. Everything else
+# in the audio_video category (amps, switches, per-room media_player surfaces)
+# is output-side wiring and shouldn't show up as "things you can play".
+_SOURCE_PROXIES = {
+    "media_service",
+    "tv",
+    "cable",
+    "cd",
+    "dvd",
+    "control4_network_mediastorage",
+}
+
+
+def _is_source(item: dict[str, Any]) -> bool:
+    proxy = str(item.get("proxy") or "")
+    return proxy in _SOURCE_PROXIES or proxy.startswith("rf_")
+
+
+@mcp.tool()
+async def list_media_sources() -> list[dict[str, Any]]:
+    """List playable audio/video sources (music services, tuners, TV, etc.).
+
+    Use the returned `id` as the `source_id` for `set_room_audio_source` or
+    `set_room_video_source`.
+    """
+    director = await _conn.director()
+    items = await director.get_all_items_by_category("audio_video")
+    return [
+        {
+            "id": it.get("id"),
+            "name": it.get("name"),
+            "proxy": it.get("proxy"),
+            "roomName": it.get("roomName"),
+        }
+        for it in items
+        if _is_source(it)
+    ]
+
+
+@mcp.tool()
+async def get_room_av_state(room_id: int) -> dict[str, Any]:
+    """Get a room's current AV state: on/off, volume (0-100), muted.
+
+    A volume of -1 means the room has no audio output configured.
+    """
+    director = await _conn.director()
+    room = C4Room(director, room_id)
+    return {
+        "room_id": room_id,
+        "is_on": await room.is_on(),
+        "volume": await room.get_volume(),
+        "muted": await room.is_muted(),
+    }
+
+
+@mcp.tool()
+async def set_room_volume(room_id: int, volume: int) -> str:
+    """Set a room's playback volume (0-100)."""
+    volume = max(0, min(100, int(volume)))
+    director = await _conn.director()
+    await C4Room(director, room_id).set_volume(volume)
+    return f"ok: room {room_id} volume={volume}"
+
+
+@mcp.tool()
+async def toggle_room_mute(room_id: int) -> str:
+    """Toggle mute for a room."""
+    director = await _conn.director()
+    await C4Room(director, room_id).toggle_mute()
+    return f"ok: room {room_id} mute toggled"
+
+
+@mcp.tool()
+async def set_room_audio_source(room_id: int, source_id: int) -> str:
+    """Route an audio-only source to a room (turns the room on).
+
+    `source_id` should be an id from `list_media_sources`. Use this for music;
+    use `set_room_video_source` for TV.
+    """
+    director = await _conn.director()
+    await C4Room(director, room_id).set_audio_source(source_id)
+    return f"ok: room {room_id} audio source = {source_id}"
+
+
+@mcp.tool()
+async def set_room_video_source(room_id: int, source_id: int) -> str:
+    """Route a video+audio source to a room (turns the room on)."""
+    director = await _conn.director()
+    await C4Room(director, room_id).set_video_and_audio_source(source_id)
+    return f"ok: room {room_id} video source = {source_id}"
+
+
+@mcp.tool()
+async def media_play(room_id: int) -> str:
+    """Send PLAY to whatever source is currently routed to the room."""
+    director = await _conn.director()
+    await C4Room(director, room_id).set_play()
+    return f"ok: room {room_id} play"
+
+
+@mcp.tool()
+async def media_pause(room_id: int) -> str:
+    """Send PAUSE to the current source in the room."""
+    director = await _conn.director()
+    await C4Room(director, room_id).set_pause()
+    return f"ok: room {room_id} pause"
+
+
+@mcp.tool()
+async def media_stop(room_id: int) -> str:
+    """Send STOP to the current source in the room."""
+    director = await _conn.director()
+    await C4Room(director, room_id).set_stop()
+    return f"ok: room {room_id} stop"
+
+
+# ---------------------------------------------------------------------------
 # Real-time event tools (WebSocket-backed)
 # ---------------------------------------------------------------------------
 

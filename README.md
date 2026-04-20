@@ -20,7 +20,14 @@ cloud round-trips for commands.
 - `set_room_off(room_id)` — ROOM_OFF
 - `set_climate(item_id, heat_setpoint_f?, cool_setpoint_f?, hvac_mode?)`
 - `set_variable(item_id, value)` — for programming variables you defined in Composer
-- `send_command(item_id, command, params?)` — escape hatch for blinds / AV / anything else
+- `send_command(item_id, command, params?)` — escape hatch for blinds / anything else
+
+**Audio / Video**
+- `list_media_sources()` — playable sources (music services, tuners, NAS, TV, cable, CD/DVD)
+- `get_room_av_state(room_id)` — on/off, volume, muted
+- `set_room_volume(room_id, 0-100)` / `toggle_room_mute(room_id)`
+- `set_room_audio_source(room_id, source_id)` / `set_room_video_source(room_id, source_id)`
+- `media_play(room_id)` / `media_pause(room_id)` / `media_stop(room_id)`
 
 **Real-time events** (WebSocket-backed)
 - `start_event_listener()` — subscribe to every item's state updates (idempotent)
