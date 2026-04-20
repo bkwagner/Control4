@@ -31,9 +31,11 @@ def _slim(it: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": it.get("id"),
         "name": it.get("name"),
-        "type": it.get("type"),
-        "category": it.get("category"),
+        "typeName": it.get("typeName"),
+        "categories": it.get("categories") or [],
         "roomId": it.get("roomId"),
+        "roomName": it.get("roomName"),
+        "floorName": it.get("floorName"),
     }
 
 
@@ -44,10 +46,18 @@ def _slim(it: dict[str, Any]) -> dict[str, Any]:
 
 @mcp.tool()
 async def list_rooms() -> list[dict[str, Any]]:
-    """List every room in the Control4 project with its id and display name."""
+    """List every room in the Control4 project with id, name, and floor."""
     director = await _conn.director()
-    items = await director.get_all_items_by_category("rooms")
-    return [{"id": it.get("id"), "name": it.get("name")} for it in items]
+    items = await director.get_all_item_info()
+    return [
+        {
+            "id": it.get("id"),
+            "name": it.get("name"),
+            "floorName": it.get("floorName"),
+        }
+        for it in items
+        if it.get("typeName") == "room"
+    ]
 
 
 @mcp.tool()
@@ -55,9 +65,11 @@ async def list_items(category: str | None = None) -> list[dict[str, Any]]:
     """List items in the project.
 
     Args:
-        category: Optional Control4 category filter, e.g. "lights",
-            "comfort" (thermostats/climate), "sensors", "security",
-            "motorization", "av". Omit to list everything.
+        category: Optional Control4 category filter. Valid values:
+            "lights", "comfort", "thermostats", "sensors", "cameras",
+            "audio_video", "motorization", "motors", "controllers",
+            "outlet_wireless_dimmer", "control4_remote_hub", "voice-scene".
+            Omit to list everything (rooms, floors, devices, agents, ...).
     """
     director = await _conn.director()
     items = (

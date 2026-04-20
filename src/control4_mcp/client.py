@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -69,7 +70,14 @@ class Control4Connection:
 
     async def _connect(self) -> None:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Control4 directors present a self-signed cert on the LAN.
+            # The cloud endpoints have valid certs, but disabling verification
+            # on one shared session is simpler than juggling two.
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+            self._session = aiohttp.ClientSession(connector=connector)
 
         account = C4Account(
             self._settings.account_email,

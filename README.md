@@ -10,7 +10,7 @@ cloud round-trips for commands.
 
 **Discovery**
 - `list_rooms()` — every room with id + name
-- `list_items(category?)` — filter by `lights`, `comfort`, `sensors`, `security`, `motorization`, `av`, etc.
+- `list_items(category?)` — filter by `lights`, `comfort`, `thermostats`, `sensors`, `cameras`, `audio_video`, `motorization`, `motors`, etc.
 - `find_items(query)` — fuzzy name search (great for "kitchen lights")
 - `get_item_variables(item_id)` — current brightness, temp, power state, ...
 
@@ -183,9 +183,11 @@ outside the server's scope but straightforward to bolt on.
 - The director bearer token is refreshed automatically every ~12h.
 - Every command goes straight to your local director — the Control4 cloud is
   only hit during the initial token exchange.
-- Common director categories: `lights`, `comfort` (thermostats), `sensors`,
-  `security`, `motorization` (blinds/shades), `av`, `rooms`. Use `list_items`
-  without a category to see everything.
+- Valid director categories (per pyControl4): `lights`, `comfort`,
+  `thermostats`, `sensors`, `cameras`, `audio_video`, `motorization`,
+  `motors`, `controllers`, `outlet_wireless_dimmer`, `control4_remote_hub`,
+  `voice-scene`. Rooms aren't a category — use `list_rooms` instead. Call
+  `list_items` without a category to see everything.
 
 ## License
 
