@@ -77,6 +77,42 @@ to 68"_.
 claude mcp add control4 -- uv --directory /path/to/control4-mcp run control4-mcp
 ```
 
+### Docker
+
+Build once:
+
+```bash
+docker compose build           # or: docker build -t control4-mcp:latest .
+```
+
+Then wire your MCP client to `docker run` the image. The image's entrypoint
+is the MCP server, and it speaks stdio:
+
+```json
+{
+  "mcpServers": {
+    "control4": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "--env-file", "/absolute/path/to/.env",
+        "--network", "host",
+        "control4-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+Notes:
+- `-i` is required (stdio pipe); **do not** pass `-t` — a TTY corrupts the
+  protocol stream.
+- `--network host` is the easy button on Linux. On macOS/Windows Docker
+  Desktop, drop that flag and use bridge networking — your director's LAN
+  IP is still routable from the Docker VM.
+- Quick smoke test with the MCP Inspector:
+  `npx @modelcontextprotocol/inspector docker run -i --rm --env-file .env --network host control4-mcp:latest`
+
 ### Alexa / Google Assistant
 
 The MCP server itself doesn't talk to Alexa or Google directly. Two easy

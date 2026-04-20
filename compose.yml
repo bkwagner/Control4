@@ -1,0 +1,18 @@
+# Convenience compose file for building and ad-hoc testing.
+#
+# NOTE: MCP servers run as short-lived subprocesses spawned by the MCP client
+# (Claude Desktop, Claude Code, VS Code Copilot, etc.), so you usually will
+# NOT `docker compose up` this. Use compose to build the image and to verify
+# startup, then point your MCP client at `docker run -i --rm ...`.
+services:
+  control4-mcp:
+    build: .
+    image: control4-mcp:latest
+    env_file: .env
+    # host networking lets the container reach your Control4 director on LAN
+    # without extra port plumbing. On macOS/Windows, switch to bridge and
+    # ensure the director IP is routable from Docker Desktop's VM.
+    network_mode: host
+    stdin_open: true
+    tty: false
+    restart: "no"
