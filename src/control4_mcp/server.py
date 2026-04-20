@@ -9,6 +9,7 @@ or:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -195,6 +196,66 @@ async def send_command(
         params or {},
     )
     return f"ok: sent {command} to item {item_id}"
+
+
+# ---------------------------------------------------------------------------
+# Real-time event tools (WebSocket-backed)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def start_event_listener() -> str:
+    """Start the Control4 WebSocket listener.
+
+    Idempotent — safe to call repeatedly. After this runs, every item state
+    change is recorded in a rolling buffer and surfaced by `get_recent_events`
+    / `wait_for_event`.
+    """
+    await _conn.ensure_websocket_started()
+    return "ok: websocket listener running"
+
+
+@mcp.tool()
+async def get_recent_events(
+    since_seconds: float = 60,
+    item_id: int | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return recent state-change events from the event buffer.
+
+    Requires `start_event_listener` to have been called.
+
+    Args:
+        since_seconds: Only return events from the last N seconds.
+        item_id: Optional filter — only events for this item.
+        limit: Max events to return (newest-first trimming).
+    """
+    await _conn.ensure_websocket_started()
+    since_ts = time.time() - max(0.0, float(since_seconds))
+    return [
+        ev.to_dict()
+        for ev in _conn.events.recent(since_ts=since_ts, item_id=item_id, limit=limit)
+    ]
+
+
+@mcp.tool()
+async def wait_for_event(
+    timeout_seconds: float = 30,
+    item_ids: list[int] | None = None,
+) -> dict[str, Any] | None:
+    """Block until a matching state-change arrives, or return None on timeout.
+
+    Handy for confirmations ("turn on the driveway lights and wait for the
+    motion sensor to clear") or for scene validation.
+
+    Args:
+        timeout_seconds: Max seconds to wait.
+        item_ids: If provided, only events for one of these item ids match.
+            Omit to wake on the first event for any item.
+    """
+    await _conn.ensure_websocket_started()
+    ev = await _conn.events.wait(item_ids=item_ids, timeout=float(timeout_seconds))
+    return ev.to_dict() if ev else None
 
 
 def main() -> None:

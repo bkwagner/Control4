@@ -22,6 +22,11 @@ cloud round-trips for commands.
 - `set_variable(item_id, value)` — for programming variables you defined in Composer
 - `send_command(item_id, command, params?)` — escape hatch for blinds / AV / anything else
 
+**Real-time events** (WebSocket-backed)
+- `start_event_listener()` — subscribe to every item's state updates (idempotent)
+- `get_recent_events(since_seconds?, item_id?, limit?)` — read recent changes
+- `wait_for_event(timeout_seconds?, item_ids?)` — block until a matching change arrives
+
 ## Setup
 
 Requires Python 3.10+. This project uses [uv](https://github.com/astral-sh/uv),
@@ -84,6 +89,25 @@ bridges:
    FastAPI service on the same host and trigger specific intents from Alexa
    Routines / Google Home Routines. Less natural, but zero-latency and no LLM
    bill.
+
+## Real-time events
+
+Call `start_event_listener` once and the server will subscribe to every item
+via Control4's WebSocket (socket.io) channel. State changes — lights, motion
+sensors, doors, thermostat readings, variables — are buffered (last 500 by
+default) and exposed via `get_recent_events` and `wait_for_event`.
+
+Useful for things like:
+- _"Wait for motion in the garage, then turn on the driveway lights if it's
+  dark."_ — chain `wait_for_event(item_ids=[motion_id])` with
+  `set_light_level`.
+- _"What has the downstairs been doing in the last 5 minutes?"_ — call
+  `get_recent_events(since_seconds=300)`.
+
+For a truly reactive setup where a Control4 event *triggers* an LLM
+conversation (rather than the LLM polling), wrap this MCP server in a small
+orchestrator that watches the event bus and spawns agent calls. That's
+outside the server's scope but straightforward to bolt on.
 
 ## Notes
 
