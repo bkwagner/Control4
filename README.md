@@ -113,6 +113,39 @@ Notes:
 - Quick smoke test with the MCP Inspector:
   `npx @modelcontextprotocol/inspector docker run -i --rm --env-file .env --network host control4-mcp:latest`
 
+#### Windows (Docker Desktop)
+
+Same image, a few adjustments:
+
+- **No `--network host`.** It exists in Docker Desktop 4.34+ but needs
+  explicit enabling and is finicky. Default bridge networking already
+  reaches LAN IPs through the WSL2 backend, so leave it off.
+- **Forward slashes in JSON paths** (or escaped backslashes):
+
+  ```json
+  {
+    "mcpServers": {
+      "control4": {
+        "command": "docker",
+        "args": [
+          "run", "-i", "--rm",
+          "--env-file", "C:/Users/you/control4-mcp/.env",
+          "control4-mcp:latest"
+        ]
+      }
+    }
+  }
+  ```
+
+- **Docker Desktop must be running** when your MCP client tries to spawn
+  the container. Enable "Start Docker Desktop when you log in" in
+  Settings → General, otherwise tool calls will fail silently after a
+  reboot.
+- **Windows Firewall** may prompt the first time the container reaches
+  your LAN — allow it on Private networks.
+- Build either from PowerShell or a WSL2 shell; both targets the same
+  Docker Desktop engine.
+
 ### Alexa / Google Assistant
 
 The MCP server itself doesn't talk to Alexa or Google directly. Two easy
