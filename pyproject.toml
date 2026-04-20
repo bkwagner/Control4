@@ -1,0 +1,23 @@
+[project]
+name = "control4-mcp"
+version = "0.1.0"
+description = "MCP server exposing Control4 home automation via pyControl4."
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = [
+    "mcp[cli]>=1.2.0",
+    "pyControl4>=1.2.0",
+    "aiohttp>=3.9",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+control4-mcp = "control4_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/control4_mcp"]
