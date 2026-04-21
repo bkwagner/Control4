@@ -394,6 +394,26 @@ async def wait_for_event(
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     transport = os.getenv("CONTROL4_MCP_TRANSPORT", "stdio")
+
+    if transport == "sse":
+        # Mount FastAPI under /api alongside the MCP SSE endpoint on the same
+        # uvicorn instance. Electron frontend hits /api/*; MCP clients hit /sse.
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.routing import Mount
+
+        from .api import create_api
+
+        port = int(os.getenv("CONTROL4_MCP_PORT", "8000"))
+        combined = Starlette(
+            routes=[
+                Mount("/api", app=create_api(_conn)),
+                Mount("/", app=mcp.sse_app()),
+            ]
+        )
+        uvicorn.run(combined, host="0.0.0.0", port=port)
+        return
+
     mcp.run(transport=transport)  # type: ignore[arg-type]
 
 
