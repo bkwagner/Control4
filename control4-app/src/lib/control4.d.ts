@@ -93,6 +93,8 @@ export interface Control4Api {
     installNow: () => Promise<void>;
     onState: (cb: (state: UpdaterState) => void) => () => void;
   };
+
+  onItemChanged: (cb: (itemId: number) => void) => () => void;
 }
 
 export type UpdaterState =

@@ -1,22 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
+import { useItemStates } from "@/hooks/useItemStates";
 import type { SecurityDevice } from "@/lib/types";
 
 interface Props {
   devices: SecurityDevice[];
 }
 
-interface SecurityState {
-  partitionState: string | null;
-  alarmState: string | null;
-}
-
-const POLL_MS = 3000;
-
 export function SecurityPanel({ devices }: Props) {
-  const [states, setStates] = useState<Map<number, SecurityState>>(
-    new Map(),
-  );
+  const { states: rawStates } = useItemStates(devices.map((d) => d.id));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [disarmCode, setDisarmCode] = useState<Map<number, string>>(
@@ -24,44 +16,26 @@ export function SecurityPanel({ devices }: Props) {
   );
   const [expandDisarm, setExpandDisarm] = useState<number | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
-
-    async function refresh(): Promise<void> {
-      try {
-        const updated = new Map(states);
-        for (const device of devices) {
-          const vars = await api.getItemVariables(device.id);
-          if (cancelled) return;
-          const partVar = vars.find((v) => v.varName === "PARTITION_STATE");
-          const alarmVar = vars.find((v) => v.varName === "ALARM_STATE");
-          updated.set(device.id, {
-            partitionState:
-              partVar && typeof partVar.value === "string"
-                ? (partVar.value as string)
-                : null,
-            alarmState:
-              alarmVar && typeof alarmVar.value === "string"
-                ? (alarmVar.value as string)
-                : null,
-          });
-        }
-        setStates(updated);
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    void refresh();
-    timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-  }, [devices]);
+  const states = new Map(
+    Array.from(rawStates.entries()).map(([id, vars]) => {
+      const vars_arr = vars as Array<{ varName: string; value: unknown }>;
+      const partVar = vars_arr.find((v) => v.varName === "PARTITION_STATE");
+      const alarmVar = vars_arr.find((v) => v.varName === "ALARM_STATE");
+      return [
+        id,
+        {
+          partitionState:
+            partVar && typeof partVar.value === "string"
+              ? (partVar.value as string)
+              : null,
+          alarmState:
+            alarmVar && typeof alarmVar.value === "string"
+              ? (alarmVar.value as string)
+              : null,
+        },
+      ];
+    }),
+  );
 
   async function handleArm(
     itemId: number,

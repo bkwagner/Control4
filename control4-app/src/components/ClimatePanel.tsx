@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
+import { useItemStates } from "@/hooks/useItemStates";
 import type { ClimateDevice } from "@/lib/types";
 
 interface Props {
   devices: ClimateDevice[];
 }
 
-const POLL_MS = 10000;
 const MODES = ["Off", "Heat", "Cool", "Auto"] as const;
 
 interface ClimateReading {
@@ -67,31 +67,17 @@ export function ClimatePanel({ devices }: Props) {
 }
 
 function ClimateCard({ device }: { device: ClimateDevice }) {
-  const [reading, setReading] = useState<ClimateReading | null>(null);
+  const { states: rawStates } = useItemStates([device.id]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localOverride, setLocalOverride] = useState<ClimateReading | null>(
+    null,
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
-    async function refresh(): Promise<void> {
-      try {
-        const vars = await api.getItemVariables(device.id);
-        if (cancelled) return;
-        setReading(parseReading(vars));
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    }
-    void refresh();
-    timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-  }, [device.id]);
+  const vars = rawStates.get(device.id) as
+    | Array<{ varName: string; value: unknown }>
+    | undefined;
+  const reading = localOverride || (vars ? parseReading(vars) : null);
 
   async function nudge(
     key: "heat" | "cool",
@@ -101,7 +87,7 @@ function ClimateCard({ device }: { device: ClimateDevice }) {
     if (current == null) return;
     const next = Math.round(current + delta);
     const prev = reading;
-    setReading((r) =>
+    setLocalOverride((r) =>
       r
         ? {
             ...r,
@@ -116,8 +102,9 @@ function ClimateCard({ device }: { device: ClimateDevice }) {
         device.id,
         key === "heat" ? { heat_setpoint_f: next } : { cool_setpoint_f: next },
       );
+      setLocalOverride(null);
     } catch (e) {
-      setReading(prev);
+      setLocalOverride(prev);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
@@ -128,7 +115,8 @@ function ClimateCard({ device }: { device: ClimateDevice }) {
     setBusy(`mode-${mode}`);
     try {
       await api.setClimate(device.id, { hvac_mode: mode });
-      setReading((r) => (r ? { ...r, hvac_mode: mode } : r));
+      setLocalOverride((r) => (r ? { ...r, hvac_mode: mode } : r));
+      setLocalOverride(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

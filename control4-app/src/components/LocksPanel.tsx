@@ -1,68 +1,52 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
+import { useItemStates } from "@/hooks/useItemStates";
 import type { LockDevice } from "@/lib/types";
 
 interface Props {
   devices: LockDevice[];
 }
 
-interface LockState {
-  locked: boolean | null;
-}
-
-const POLL_MS = 5000;
-
 export function LocksPanel({ devices }: Props) {
-  const [states, setStates] = useState<Map<number, LockState>>(new Map());
+  const { states: rawStates } = useItemStates(devices.map((d) => d.id));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localOverrides, setLocalOverrides] = useState<
+    Map<number, { locked: boolean | null }>
+  >(new Map());
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
-
-    async function refresh(): Promise<void> {
-      try {
-        const updated = new Map(states);
-        for (const device of devices) {
-          const vars = await api.getItemVariables(device.id);
-          if (cancelled) return;
-          // Try both LOCKSTATE and LOCKED_STATE variable names
-          const stateVar =
-            vars.find((v) => v.varName === "LOCKSTATE") ||
-            vars.find((v) => v.varName === "LOCKED_STATE");
-          const locked =
-            stateVar && typeof stateVar.value === "number"
-              ? stateVar.value === 1
-              : null;
-          updated.set(device.id, { locked });
-        }
-        setStates(updated);
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    void refresh();
-    timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-  }, [devices]);
+  const states = new Map(
+    Array.from(rawStates.entries()).map(([id, vars]) => {
+      const vars_arr = vars as Array<{ varName: string; value: unknown }>;
+      const stateVar =
+        vars_arr.find((v) => v.varName === "LOCKSTATE") ||
+        vars_arr.find((v) => v.varName === "LOCKED_STATE");
+      const locked =
+        stateVar && typeof stateVar.value === "number"
+          ? stateVar.value === 1
+          : null;
+      return [
+        id,
+        localOverrides.get(id) || { locked },
+      ];
+    }),
+  );
 
   async function handleLock(itemId: number, locked: boolean): Promise<void> {
     const key = locked ? "locking" : "unlocking";
     setBusy(`${key}-${itemId}`);
     const prev = states.get(itemId);
-    setStates((m) => new Map(m).set(itemId, { locked }));
+    setLocalOverrides((m) => new Map(m).set(itemId, { locked }));
     try {
       await api.setLock(itemId, locked);
       setError(null);
+      setLocalOverrides((m) => {
+        const n = new Map(m);
+        n.delete(itemId);
+        return n;
+      });
     } catch (e) {
-      setStates((m) => new Map(m).set(itemId, prev || { locked: null }));
+      setLocalOverrides((m) => new Map(m).set(itemId, prev || { locked: null }));
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);

@@ -112,6 +112,13 @@ const api = {
       return () => ipcRenderer.removeListener("updater:state", listener);
     },
   },
+
+  // Events
+  onItemChanged: (cb: (itemId: number) => void) => {
+    const listener = (_e: unknown, id: number) => cb(id);
+    ipcRenderer.on("events:itemChanged", listener);
+    return () => ipcRenderer.removeListener("events:itemChanged", listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("control4", api);

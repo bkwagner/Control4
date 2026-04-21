@@ -1,51 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { useItemStates } from "@/hooks/useItemStates";
 import type { BlindDevice } from "@/lib/types";
 
 interface Props {
   devices: BlindDevice[];
 }
 
-const POLL_MS = 5000;
-
 export function BlindsPanel({ devices }: Props) {
-  const [levels, setLevels] = useState<Map<number, number | null>>(new Map());
+  const { states: rawStates } = useItemStates(devices.map((d) => d.id));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localOverrides, setLocalOverrides] = useState<Map<number, number>>(
+    new Map(),
+  );
   const pendingRef = useRef<Map<number, number>>(new Map());
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
-
-    async function refresh(): Promise<void> {
-      try {
-        const updated = new Map(levels);
-        for (const device of devices) {
-          const vars = await api.getItemVariables(device.id);
-          if (cancelled) return;
-          const levelVar = vars.find((v) => v.varName === "CURRENT_LEVEL");
-          const level =
-            levelVar && typeof levelVar.value === "number"
-              ? levelVar.value
-              : null;
-          updated.set(device.id, level);
-        }
-        setLevels(updated);
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    void refresh();
-    timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-  }, [devices]);
+  const levels = new Map(
+    Array.from(rawStates.entries()).map(([id, vars]) => {
+      if (localOverrides.has(id)) return [id, localOverrides.get(id)];
+      const vars_arr = vars as Array<{ varName: string; value: unknown }>;
+      const levelVar = vars_arr.find((v) => v.varName === "CURRENT_LEVEL");
+      const level =
+        levelVar && typeof levelVar.value === "number" ? levelVar.value : null;
+      return [id, level];
+    }),
+  );
 
   async function handleSetLevel(
     itemId: number,
@@ -53,7 +33,7 @@ export function BlindsPanel({ devices }: Props) {
   ): Promise<void> {
     const clamped = Math.max(0, Math.min(100, Math.round(level)));
     pendingRef.current.set(itemId, Date.now());
-    setLevels((prev) => new Map(prev).set(itemId, clamped));
+    setLocalOverrides((prev) => new Map(prev).set(itemId, clamped));
     try {
       await api.setBlindLevel(itemId, clamped);
     } catch (e) {

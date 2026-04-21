@@ -32,6 +32,13 @@ function requireClient(): Control4Client {
   return client;
 }
 
+function startEventListener(): void {
+  if (!client || !mainWindow) return;
+  client.startEventListener((itemId) => {
+    mainWindow?.webContents.send("events:itemChanged", itemId);
+  });
+}
+
 function registerIpc(): void {
   // Config
   ipcMain.handle("config:get", async () => loadSettings());
@@ -40,6 +47,7 @@ function registerIpc(): void {
     resetClient(next);
     // Validate by forcing an auth round-trip.
     await requireClient().healthCheck();
+    startEventListener();
     return true;
   });
   ipcMain.handle("config:clear", async () => {
@@ -225,6 +233,7 @@ app.whenReady().then(async () => {
   registerIpc();
   await initClient();
   await createWindow();
+  startEventListener();
   setupAutoUpdater(() => mainWindow);
 });
 

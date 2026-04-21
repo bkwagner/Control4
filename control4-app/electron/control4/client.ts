@@ -11,6 +11,7 @@ import {
   getDirectorBearerToken,
 } from "./auth";
 import type { DirectorToken } from "./auth";
+import { Control4WebSocket } from "./websocket";
 
 // Binding-class values Control4 actually emits on source Outputs. These
 // are the structural signal that a tile in `audio_video` carries real A/V
@@ -478,6 +479,9 @@ export class Control4Client {
   private director: Director | null = null;
   private tokenExpiresAt = 0;
   private connectingPromise: Promise<Director> | null = null;
+  private directorToken: string | null = null;
+  private ws: Control4WebSocket | null = null;
+  private wsCallback: ((itemId: number) => void) | null = null;
 
   constructor(private readonly settings: Settings) {}
 
@@ -518,6 +522,12 @@ export class Control4Client {
     const director = new Director(this.settings.directorIp, token.token);
     this.director = director;
     this.tokenExpiresAt = token.expiresAt;
+    this.directorToken = token.token;
+    if (this.ws && this.wsCallback) {
+      this.ws.disconnect();
+      this.ws = null;
+      this.startEventListener(this.wsCallback);
+    }
     return director;
   }
 
@@ -547,6 +557,21 @@ export class Control4Client {
   async healthCheck(): Promise<{ status: string }> {
     await this.ensureDirector();
     return { status: "ok" };
+  }
+
+  startEventListener(onItemChanged: (itemId: number) => void): void {
+    this.wsCallback = onItemChanged;
+    if (!this.directorToken) return;
+    this.ws?.disconnect();
+    this.ws = new Control4WebSocket(this.settings.directorIp, this.directorToken);
+    this.ws.onItemChanged(onItemChanged);
+    this.ws.connect();
+  }
+
+  stopEventListener(): void {
+    this.ws?.disconnect();
+    this.ws = null;
+    this.wsCallback = null;
   }
 
   async listRooms(): Promise<RoomDTO[]> {
