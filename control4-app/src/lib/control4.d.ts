@@ -3,12 +3,15 @@
 // tells the renderer TypeScript compiler what shape to expect.
 
 import type {
+  BlindDevice,
   ClimateDevice,
   Light,
+  LockDevice,
   MediaBrowseGroup,
   MediaSource,
   Room,
   RoomAvState,
+  SecurityDevice,
 } from "./types";
 
 export interface AppSettings {
@@ -35,6 +38,7 @@ export interface Control4Api {
 
   listMediaSources: () => Promise<MediaSource[]>;
   getRoomAvState: (roomId: number) => Promise<RoomAvState>;
+  getAllRoomsAvState: (roomIds: number[]) => Promise<RoomAvState[]>;
   setRoomVolume: (roomId: number, volume: number) => Promise<void>;
   toggleRoomMute: (roomId: number) => Promise<void>;
   setRoomAudioSource: (roomId: number, sourceId: number) => Promise<void>;
@@ -69,6 +73,19 @@ export interface Control4Api {
       hvac_mode?: string;
     },
   ) => Promise<void>;
+
+  listBlinds: () => Promise<BlindDevice[]>;
+  setBlindLevel: (itemId: number, level: number) => Promise<void>;
+  openBlind: (itemId: number) => Promise<void>;
+  closeBlind: (itemId: number) => Promise<void>;
+  stopBlind: (itemId: number) => Promise<void>;
+
+  listLocks: () => Promise<LockDevice[]>;
+  setLock: (itemId: number, locked: boolean) => Promise<void>;
+
+  listSecurity: () => Promise<SecurityDevice[]>;
+  armSecurity: (itemId: number, mode: "away" | "stay" | "night") => Promise<void>;
+  disarmSecurity: (itemId: number, code: string) => Promise<void>;
 
   updater: {
     getState: () => Promise<UpdaterState>;

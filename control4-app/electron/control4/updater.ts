@@ -63,9 +63,29 @@ async function promptRestart(window: BrowserWindow): Promise<void> {
 }
 
 export function setupAutoUpdater(getWindow: () => BrowserWindow | null): void {
+  // Register IPC handlers unconditionally so the renderer's UpdateIndicator
+  // doesn't blow up in dev with "No handler registered for 'updater:getState'".
+  // In dev the state stays permanently "idle" and manual-check is a no-op.
+  ipcMain.handle("updater:getState", () => state);
+  ipcMain.handle("updater:check", async () => {
+    if (!app.isPackaged) return state;
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (err) {
+      state = {
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+    return state;
+  });
+  ipcMain.handle("updater:installNow", () => {
+    if (state.status === "downloaded") install();
+  });
+
   if (!app.isPackaged) {
     // electron-updater throws "dev app update config" without a
-    // dev-app-update.yml. Skip the whole subsystem in dev builds.
+    // dev-app-update.yml. Skip the autoUpdater subscription in dev.
     return;
   }
 
@@ -106,22 +126,6 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null): void {
     state = { status: "error", message: err?.message ?? String(err) };
     broadcast(getWindow());
     log.warn("[updater]", err);
-  });
-
-  ipcMain.handle("updater:getState", () => state);
-  ipcMain.handle("updater:check", async () => {
-    try {
-      await autoUpdater.checkForUpdates();
-    } catch (err) {
-      state = {
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      };
-    }
-    return state;
-  });
-  ipcMain.handle("updater:installNow", () => {
-    if (state.status === "downloaded") install();
   });
 
   setTimeout(() => {

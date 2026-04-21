@@ -72,6 +72,9 @@ function registerIpc(): void {
   ipcMain.handle("av:roomState", async (_e, roomId: number) =>
     requireClient().getRoomAvState(roomId),
   );
+  ipcMain.handle("av:allRoomsState", async (_e, roomIds: number[]) =>
+    requireClient().getMultiRoomAvState(roomIds),
+  );
   ipcMain.handle("av:volume", async (_e, roomId: number, volume: number) =>
     requireClient().setRoomVolume(roomId, volume),
   );
@@ -141,6 +144,35 @@ function registerIpc(): void {
         hvac_mode?: string;
       },
     ) => requireClient().setClimate(itemId, payload),
+  );
+
+  ipcMain.handle("blinds:list", async () => requireClient().listBlinds());
+  ipcMain.handle("blinds:setLevel", async (_e, itemId: number, level: number) =>
+    requireClient().setBlindLevel(itemId, level),
+  );
+  ipcMain.handle("blinds:open", async (_e, itemId: number) =>
+    requireClient().openBlind(itemId),
+  );
+  ipcMain.handle("blinds:close", async (_e, itemId: number) =>
+    requireClient().closeBlind(itemId),
+  );
+  ipcMain.handle("blinds:stop", async (_e, itemId: number) =>
+    requireClient().stopBlind(itemId),
+  );
+
+  ipcMain.handle("locks:list", async () => requireClient().listLocks());
+  ipcMain.handle("locks:set", async (_e, itemId: number, locked: boolean) =>
+    requireClient().setLock(itemId, locked),
+  );
+
+  ipcMain.handle("security:list", async () => requireClient().listSecurity());
+  ipcMain.handle(
+    "security:arm",
+    async (_e, itemId: number, mode: "away" | "stay" | "night") =>
+      requireClient().armSecurity(itemId, mode),
+  );
+  ipcMain.handle("security:disarm", async (_e, itemId: number, code: string) =>
+    requireClient().disarmSecurity(itemId, code),
   );
 }
 

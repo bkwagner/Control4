@@ -15,6 +15,8 @@ export const api = {
 
   listMediaSources: () => window.control4.listMediaSources(),
   getRoomAvState: (roomId: number) => window.control4.getRoomAvState(roomId),
+  getAllRoomsAvState: (roomIds: number[]) =>
+    window.control4.getAllRoomsAvState(roomIds),
   setRoomVolume: (roomId: number, volume: number) =>
     window.control4.setRoomVolume(roomId, volume),
   toggleRoomMute: (roomId: number) => window.control4.toggleRoomMute(roomId),
@@ -52,4 +54,21 @@ export const api = {
       hvac_mode?: string;
     },
   ) => window.control4.setClimate(itemId, payload),
+
+  listBlinds: () => window.control4.listBlinds(),
+  setBlindLevel: (itemId: number, level: number) =>
+    window.control4.setBlindLevel(itemId, level),
+  openBlind: (itemId: number) => window.control4.openBlind(itemId),
+  closeBlind: (itemId: number) => window.control4.closeBlind(itemId),
+  stopBlind: (itemId: number) => window.control4.stopBlind(itemId),
+
+  listLocks: () => window.control4.listLocks(),
+  setLock: (itemId: number, locked: boolean) =>
+    window.control4.setLock(itemId, locked),
+
+  listSecurity: () => window.control4.listSecurity(),
+  armSecurity: (itemId: number, mode: "away" | "stay" | "night") =>
+    window.control4.armSecurity(itemId, mode),
+  disarmSecurity: (itemId: number, code: string) =>
+    window.control4.disarmSecurity(itemId, code),
 };

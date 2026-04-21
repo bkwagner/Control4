@@ -5,9 +5,12 @@ interface Props {
   selectedId: number | null;
   onSelect: (id: number) => void;
   onRoomOff: (id: number) => void;
+  onWholeHome: () => void;
+  hasActiveAv: boolean;
+  isWholeHomeSelected: boolean;
 }
 
-export function RoomList({ rooms, selectedId, onSelect, onRoomOff }: Props) {
+export function RoomList({ rooms, selectedId, onSelect, onRoomOff, onWholeHome, hasActiveAv, isWholeHomeSelected }: Props) {
   const byFloor = new Map<string, Room[]>();
   for (const r of rooms) {
     const key = r.floorName ?? "Other";
@@ -24,6 +27,26 @@ export function RoomList({ rooms, selectedId, onSelect, onRoomOff }: Props) {
         <span className="text-xs text-neutral-600">{rooms.length}</span>
       </div>
       <div className="flex flex-col gap-6 px-3 py-4">
+        <button
+          onClick={onWholeHome}
+          className={[
+            "group flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors",
+            isWholeHomeSelected
+              ? "bg-accent-500/15 text-white ring-1 ring-accent-500/40"
+              : "text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100",
+          ].join(" ")}
+          title="Whole Home Audio"
+        >
+          <span className="truncate">Whole Home</span>
+          <span
+            className={[
+              "ml-2 text-lg transition-colors",
+              hasActiveAv ? "text-accent-400" : "text-neutral-700",
+            ].join(" ")}
+          >
+            ♪
+          </span>
+        </button>
         {[...byFloor.entries()].map(([floor, roomsOnFloor]) => (
           <div key={floor}>
             <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-neutral-600">

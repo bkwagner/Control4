@@ -3,4 +3,5 @@ dist
 dist-electron
 release
 .vite
+.release-notes.md
 *.log

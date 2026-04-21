@@ -13,7 +13,7 @@
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "dist:dir": "npm run build && electron-builder --dir",
-    "release": "npm run build && electron-builder --win --publish always"
+    "release": "node scripts/build-release-notes.mjs && npm run build && electron-builder --win --publish always"
   },
   "build": {
     "appId": "com.bkwagner.control4-app",
@@ -51,9 +51,13 @@
       {
         "provider": "github",
         "owner": "bkwagner",
-        "repo": "Control4"
+        "repo": "Control4",
+        "releaseType": "draft"
       }
-    ]
+    ],
+    "releaseInfo": {
+      "releaseNotesFile": ".release-notes.md"
+    }
   },
   "dependencies": {
     "electron-updater": "^6.8.3",

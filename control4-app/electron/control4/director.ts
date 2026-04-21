@@ -86,10 +86,14 @@ export class Director {
     return this.request<T>("GET", path);
   }
 
+  // Most commands accept tParams as a dict (SET_LEVEL, SELECT_AUDIO_DEVICE, …).
+  // SELECT_*_MEDIA specifically crashes with "cond.params.push is not a
+  // function" unless tParams is an array of {name, value}. Callers that hit
+  // that path pass an array directly.
   async sendCommand<T = unknown>(
     itemId: number,
     command: string,
-    params: Record<string, unknown> = {},
+    params: Record<string, unknown> | Array<{ name: string; value: unknown }> = {},
   ): Promise<T> {
     return this.request<T>("POST", `/api/v1/items/${itemId}/commands`, {
       async: true,

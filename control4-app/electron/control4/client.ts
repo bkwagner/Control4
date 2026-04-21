@@ -127,6 +127,14 @@ export interface MediaSourceDTO {
 }
 export type RoomAvMode = "off" | "audio" | "video";
 
+export interface NowPlayingDTO {
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  channel: string | null;
+  img_url: string | null;
+  media_type: string | null;
+}
 export interface RoomAvStateDTO {
   room_id: number;
   is_on: boolean;
@@ -135,8 +143,31 @@ export interface RoomAvStateDTO {
   mode: RoomAvMode;
   audio_source_id: number | null;
   video_source_id: number | null;
+  now_playing: NowPlayingDTO | null;
+  matrix_source_id: number | null;
 }
 export interface ClimateDeviceDTO {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface BlindDTO {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface LockDTO {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface SecurityDeviceDTO {
   id: number;
   name: string;
   roomId: number | null;
@@ -360,10 +391,87 @@ function slimClimate(it: DirectorItem): ClimateDeviceDTO {
   };
 }
 
+function slimBlind(it: DirectorItem): BlindDTO {
+  return {
+    id: it.id,
+    name: String(it.name ?? ""),
+    roomId: (it.roomId as number | null) ?? null,
+    roomName: (it.roomName as string | null) ?? null,
+  };
+}
+
+function slimLock(it: DirectorItem): LockDTO {
+  return {
+    id: it.id,
+    name: String(it.name ?? ""),
+    roomId: (it.roomId as number | null) ?? null,
+    roomName: (it.roomName as string | null) ?? null,
+  };
+}
+
+function slimSecurity(it: DirectorItem): SecurityDeviceDTO {
+  return {
+    id: it.id,
+    name: String(it.name ?? ""),
+    roomId: (it.roomId as number | null) ?? null,
+    roomName: (it.roomName as string | null) ?? null,
+  };
+}
+
 function toInt(v: unknown): number | null {
   if (v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+// Pandora/Spotify/SiriusXM album-art URLs arrive base64-encoded; anything else
+// (raw URLs, path fragments) passes through as-is. Returns null for empty.
+function decodeImg(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw === "") return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  try {
+    const decoded = Buffer.from(raw, "base64").toString("utf8");
+    if (/^https?:\/\//i.test(decoded)) return decoded;
+  } catch {
+    // fall through
+  }
+  return raw;
+}
+
+function parseNowPlaying(raw: unknown): NowPlayingDTO | null {
+  if (raw == null) return null;
+  let obj: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  const info =
+    (obj as { mediainfo?: unknown })?.mediainfo ??
+    (obj as { wallmediainfo?: { mediainfo?: unknown } })?.wallmediainfo
+      ?.mediainfo;
+  if (!info || typeof info !== "object") return null;
+  const m = info as Record<string, unknown>;
+  const title = typeof m.title === "string" && m.title !== "" ? m.title : null;
+  const artist =
+    typeof m.artist === "string" && m.artist !== "" ? m.artist : null;
+  const album = typeof m.album === "string" && m.album !== "" ? m.album : null;
+  const channel =
+    typeof m.channel === "string" && m.channel !== "" ? m.channel : null;
+  const mediaType =
+    typeof m.mediatype === "string" && m.mediatype !== "" ? m.mediatype : null;
+  const img = decodeImg(m.img);
+  if (!title && !artist && !album && !channel && !img) return null;
+  return {
+    title,
+    artist,
+    album,
+    channel,
+    img_url: img,
+    media_type: mediaType,
+  };
 }
 
 export class Control4Client {
@@ -643,9 +751,16 @@ export class Control4Client {
     const mutedVal = read("IS_MUTED");
     const videoSourceVal = read("CURRENT_VIDEO_DEVICE");
     const audioSourceVal = read("CURRENT_AUDIO_DEVICE");
+    // With matrix audio, CURRENT_AUDIO_DEVICE is the hub (e.g. DMS 100002)
+    // rather than the actual source (Pandora/Spotify/SiriusXM item). The room
+    // also exposes PLAYING_AUDIO_DEVICE as the real source — prefer it so
+    // "Listening to X" resolves to a user-facing source tile.
+    const playingAudioVal = read("PLAYING_AUDIO_DEVICE");
+    const mediaInfoRaw = read("CURRENT MEDIA INFO", "CURRENT_MEDIA_INFO");
 
     const audioSourceId = toInt(audioSourceVal);
     const videoSourceId = toInt(videoSourceVal);
+    const playingAudioId = toInt(playingAudioVal);
     const videoActive = videoSourceId != null && videoSourceId !== 0;
     const audioActive = audioSourceId != null && audioSourceId !== 0;
     const isOn = Number(powerState ?? 0) !== 0 || videoActive || audioActive;
@@ -655,6 +770,9 @@ export class Control4Client {
         ? "audio"
         : "off";
 
+    const effectiveAudioId =
+      playingAudioId && playingAudioId !== 0 ? playingAudioId : audioSourceId;
+
     return {
       room_id: roomId,
       is_on: isOn,
@@ -662,10 +780,19 @@ export class Control4Client {
       muted: Number(mutedVal ?? 0) !== 0,
       mode,
       audio_source_id:
-        audioSourceId && audioSourceId !== 0 ? audioSourceId : null,
+        effectiveAudioId && effectiveAudioId !== 0 ? effectiveAudioId : null,
       video_source_id:
         videoSourceId && videoSourceId !== 0 ? videoSourceId : null,
+      now_playing: parseNowPlaying(mediaInfoRaw),
+      matrix_source_id:
+        audioSourceId && audioSourceId !== 0 ? audioSourceId : null,
     };
+  }
+
+  async getMultiRoomAvState(
+    roomIds: number[],
+  ): Promise<RoomAvStateDTO[]> {
+    return Promise.all(roomIds.map((id) => this.getRoomAvState(id)));
   }
 
   async roomCommand(
@@ -796,10 +923,13 @@ export class Control4Client {
   ): Promise<void> {
     const director = await this.ensureDirector();
     const command = `SELECT_${isVideo ? "VIDEO" : "AUDIO"}_MEDIA:${kind}`;
-    await director.sendCommand(roomId, command, {
-      mediaid: mediaId,
-      deselect: "1",
-    });
+    // SELECT_*_MEDIA requires tParams as an array of {name, value}. The dict
+    // shape that works for SELECT_AUDIO_DEVICE and every other command fails
+    // here with "cond.params.push is not a function" (confirmed empirically
+    // via scripts/probe-select-media.mjs).
+    await director.sendCommand(roomId, command, [
+      { name: "mediaid", value: mediaId },
+    ]);
   }
 
   async listClimate(): Promise<ClimateDeviceDTO[]> {
@@ -819,6 +949,52 @@ export class Control4Client {
     return probed
       .filter((it): it is DirectorItem => it !== null)
       .map(slimClimate);
+  }
+
+  async listBlinds(): Promise<BlindDTO[]> {
+    const director = await this.ensureDirector();
+    const raw = await director.getItemsByCategory("motorization");
+    const items = keepLeaves(raw).filter(
+      (it) => String(it.proxy ?? "") === "blind",
+    );
+    // Filter out blind groups (which have no CURRENT_LEVEL variable)
+    const probed = await Promise.all(
+      items.map(async (it) => {
+        const level = await director
+          .getItemVariable(it.id, "CURRENT_LEVEL")
+          .catch(() => null);
+        return level != null ? it : null;
+      }),
+    );
+    return probed
+      .filter((it): it is DirectorItem => it !== null)
+      .map(slimBlind);
+  }
+
+  async listLocks(): Promise<LockDTO[]> {
+    const director = await this.ensureDirector();
+    const raw = await director.getAllItems();
+    // Look for lock-like proxies
+    const lockProxies = [
+      "Lock_Zigbee_Baldwin_SmartLock",
+      "relaysingle_doorlock_c4",
+      "lock",
+      "door_lock",
+    ];
+    const items = keepLeaves(raw).filter((it) =>
+      lockProxies.includes(String(it.proxy ?? "")),
+    );
+    return items.map(slimLock);
+  }
+
+  async listSecurity(): Promise<SecurityDeviceDTO[]> {
+    const director = await this.ensureDirector();
+    const raw = await director.getItemsByCategory("security");
+    const items = keepLeaves(raw).filter(
+      (it) => String(it.proxy ?? "") === "security",
+    );
+    // Filter to only main panels (skip partitions for now, or include all)
+    return items.map(slimSecurity);
   }
 
   async setClimate(
@@ -852,5 +1028,47 @@ export class Control4Client {
     if (applied.length === 0) {
       throw new Error("setClimate requires at least one field");
     }
+  }
+
+  async setBlindLevel(itemId: number, level: number): Promise<void> {
+    const director = await this.ensureDirector();
+    const clamped = Math.max(0, Math.min(100, Math.round(level)));
+    await director.sendCommand(itemId, "SET_LEVEL", { LEVEL: clamped });
+  }
+
+  async openBlind(itemId: number): Promise<void> {
+    const director = await this.ensureDirector();
+    await director.sendCommand(itemId, "OPEN", {});
+  }
+
+  async closeBlind(itemId: number): Promise<void> {
+    const director = await this.ensureDirector();
+    await director.sendCommand(itemId, "CLOSE", {});
+  }
+
+  async stopBlind(itemId: number): Promise<void> {
+    const director = await this.ensureDirector();
+    await director.sendCommand(itemId, "STOP", {});
+  }
+
+  async setLock(itemId: number, locked: boolean): Promise<void> {
+    const director = await this.ensureDirector();
+    const command = locked ? "LOCK" : "UNLOCK";
+    await director.sendCommand(itemId, command, {});
+  }
+
+  async armSecurity(
+    itemId: number,
+    mode: "away" | "stay" | "night",
+  ): Promise<void> {
+    const director = await this.ensureDirector();
+    const command =
+      mode === "away" ? "ARM_AWAY" : mode === "stay" ? "ARM_STAY" : "ARM_NIGHT";
+    await director.sendCommand(itemId, command, {});
+  }
+
+  async disarmSecurity(itemId: number, code: string): Promise<void> {
+    const director = await this.ensureDirector();
+    await director.sendCommand(itemId, "DISARM", { CODE: code });
   }
 }

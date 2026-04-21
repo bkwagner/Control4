@@ -38,6 +38,8 @@ const api = {
   listMediaSources: () => ipcRenderer.invoke("av:sources"),
   getRoomAvState: (roomId: number) =>
     ipcRenderer.invoke("av:roomState", roomId),
+  getAllRoomsAvState: (roomIds: number[]) =>
+    ipcRenderer.invoke("av:allRoomsState", roomIds),
   setRoomVolume: (roomId: number, volume: number) =>
     ipcRenderer.invoke("av:volume", roomId, volume),
   toggleRoomMute: (roomId: number) =>
@@ -78,6 +80,26 @@ const api = {
   listClimate: () => ipcRenderer.invoke("climate:list"),
   setClimate: (itemId: number, payload: ClimatePayload) =>
     ipcRenderer.invoke("climate:set", itemId, payload),
+
+  // Blinds
+  listBlinds: () => ipcRenderer.invoke("blinds:list"),
+  setBlindLevel: (itemId: number, level: number) =>
+    ipcRenderer.invoke("blinds:setLevel", itemId, level),
+  openBlind: (itemId: number) => ipcRenderer.invoke("blinds:open", itemId),
+  closeBlind: (itemId: number) => ipcRenderer.invoke("blinds:close", itemId),
+  stopBlind: (itemId: number) => ipcRenderer.invoke("blinds:stop", itemId),
+
+  // Locks
+  listLocks: () => ipcRenderer.invoke("locks:list"),
+  setLock: (itemId: number, locked: boolean) =>
+    ipcRenderer.invoke("locks:set", itemId, locked),
+
+  // Security
+  listSecurity: () => ipcRenderer.invoke("security:list"),
+  armSecurity: (itemId: number, mode: "away" | "stay" | "night") =>
+    ipcRenderer.invoke("security:arm", itemId, mode),
+  disarmSecurity: (itemId: number, code: string) =>
+    ipcRenderer.invoke("security:disarm", itemId, code),
 
   // Updater
   updater: {

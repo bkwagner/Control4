@@ -221,12 +221,35 @@ export function AudioPanel({
         ].join(" ")}
       >
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-              {headerLabel}
-            </div>
-            <div className="mt-1 truncate text-lg font-medium">
-              {activeSource?.name ?? (mode === "off" ? "Nothing playing" : "—")}
+          <div className="flex min-w-0 items-start gap-4">
+            {state?.now_playing?.img_url && (
+              <img
+                src={state.now_playing.img_url}
+                alt=""
+                className="h-16 w-16 shrink-0 rounded-md border border-neutral-800 object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                }}
+              />
+            )}
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+                {headerLabel}
+                {activeSource && mode !== "off" ? ` · ${activeSource.name}` : ""}
+              </div>
+              <div className="mt-1 truncate text-lg font-medium">
+                {state?.now_playing?.title ??
+                  state?.now_playing?.channel ??
+                  activeSource?.name ??
+                  (mode === "off" ? "Nothing playing" : "—")}
+              </div>
+              {(state?.now_playing?.artist ?? state?.now_playing?.album) && (
+                <div className="mt-0.5 truncate text-sm text-neutral-400">
+                  {[state.now_playing?.artist, state.now_playing?.album]
+                    .filter(Boolean)
+                    .join(" — ")}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">

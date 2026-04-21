@@ -36,6 +36,15 @@ export interface MediaSource {
 
 export type RoomAvMode = "off" | "audio" | "video";
 
+export interface NowPlaying {
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  channel: string | null;
+  img_url: string | null;
+  media_type: string | null;
+}
+
 export interface RoomAvState {
   room_id: number;
   is_on: boolean;
@@ -44,9 +53,32 @@ export interface RoomAvState {
   mode: RoomAvMode;
   audio_source_id: number | null;
   video_source_id: number | null;
+  now_playing: NowPlaying | null;
+  matrix_source_id: number | null;
 }
 
 export interface ClimateDevice {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface BlindDevice {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface LockDevice {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface SecurityDevice {
   id: number;
   name: string;
   roomId: number | null;
