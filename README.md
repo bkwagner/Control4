@@ -245,7 +245,34 @@ Director IP; those settings are persisted to Electron's `userData` (e.g.
 ```bash
 npm run build                # tsc + vite build → dist/ + dist-electron/
 npm run typecheck            # both renderer and main tsconfigs
+npm run dist:win             # NSIS installer → control4-app/release/
+npm run dist:dir             # unpacked .exe (faster smoke test)
 ```
+
+### Auto-update
+
+The packaged app checks GitHub Releases on launch (and every 6h after) via
+[electron-updater](https://www.electron.build/auto-update). When a newer
+tag is found, the new installer downloads in the background; the user sees
+a "Restart to update" pill in the header and a dialog prompting to restart
+when the download finishes. Skipping the prompt defers the install to the
+next app quit.
+
+Cutting a release:
+
+```bash
+# bump the version in control4-app/package.json, e.g. 0.1.0 → 0.1.1
+GH_TOKEN=ghp_your_token npm run release  # from control4-app/
+```
+
+`npm run release` runs `electron-builder --win --publish always`, which
+builds the NSIS installer and uploads it (plus the `latest.yml` manifest
+that `electron-updater` reads) as assets on the GitHub release matching
+the current `package.json` version. The token needs `repo` scope.
+
+Unsigned builds still auto-update, but Windows SmartScreen warns users on
+each install — "More info → Run anyway" gets past it. A code-signing cert
+(Sectigo / DigiCert, ~$100–400/yr) removes the warning entirely.
 
 ---
 

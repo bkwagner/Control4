@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
-    "dist:dir": "npm run build && electron-builder --dir"
+    "dist:dir": "npm run build && electron-builder --dir",
+    "release": "npm run build && electron-builder --win --publish always"
   },
   "build": {
     "appId": "com.bkwagner.control4-app",
@@ -29,7 +30,12 @@
     "asar": true,
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
@@ -40,9 +46,17 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Control4"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "bkwagner",
+        "repo": "Control4"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "^6.8.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

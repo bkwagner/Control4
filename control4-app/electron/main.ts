@@ -8,6 +8,7 @@ import {
   saveSettings,
   type Settings,
 } from "./control4/config";
+import { setupAutoUpdater } from "./control4/updater";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -192,6 +193,7 @@ app.whenReady().then(async () => {
   registerIpc();
   await initClient();
   await createWindow();
+  setupAutoUpdater(() => mainWindow);
 });
 
 app.on("window-all-closed", () => {

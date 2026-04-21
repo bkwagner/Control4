@@ -7,6 +7,7 @@ import { LightsGrid } from "@/components/LightsGrid";
 import { AudioPanel } from "@/components/AudioPanel";
 import { ClimatePanel } from "@/components/ClimatePanel";
 import { SetupScreen } from "@/components/SetupScreen";
+import { UpdateIndicator } from "@/components/UpdateIndicator";
 
 const REFRESH_MS = 5000;
 // Director takes a moment to reflect a SET_LEVEL in GET queries. During that
@@ -270,6 +271,7 @@ export default function App() {
                   All off
                 </button>
               )}
+              <UpdateIndicator />
               <button
                 onClick={() => setShowSettings(true)}
                 title="Settings"

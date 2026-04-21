@@ -78,6 +78,18 @@ const api = {
   listClimate: () => ipcRenderer.invoke("climate:list"),
   setClimate: (itemId: number, payload: ClimatePayload) =>
     ipcRenderer.invoke("climate:set", itemId, payload),
+
+  // Updater
+  updater: {
+    getState: () => ipcRenderer.invoke("updater:getState"),
+    check: () => ipcRenderer.invoke("updater:check"),
+    installNow: () => ipcRenderer.invoke("updater:installNow"),
+    onState: (cb: (state: unknown) => void) => {
+      const listener = (_e: unknown, s: unknown) => cb(s);
+      ipcRenderer.on("updater:state", listener);
+      return () => ipcRenderer.removeListener("updater:state", listener);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("control4", api);

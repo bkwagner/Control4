@@ -69,7 +69,23 @@ export interface Control4Api {
       hvac_mode?: string;
     },
   ) => Promise<void>;
+
+  updater: {
+    getState: () => Promise<UpdaterState>;
+    check: () => Promise<UpdaterState>;
+    installNow: () => Promise<void>;
+    onState: (cb: (state: UpdaterState) => void) => () => void;
+  };
 }
+
+export type UpdaterState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "available"; version: string }
+  | { status: "not-available" }
+  | { status: "downloading"; version: string; percent: number }
+  | { status: "downloaded"; version: string }
+  | { status: "error"; message: string };
 
 declare global {
   interface Window {
