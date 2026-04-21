@@ -1,0 +1,32 @@
+{
+  "name": "control4-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Control4 desktop app (Electron) — talks to the control4-mcp REST API.",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite\" \"wait-on tcp:5173 && npm run electron:dev\"",
+    "electron:dev": "tsc -p electron/tsconfig.json && node scripts/dev-electron.mjs",
+    "build": "tsc -p electron/tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "wait-on": "^8.0.0"
+  }
+}
