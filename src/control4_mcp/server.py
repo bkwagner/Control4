@@ -9,6 +9,7 @@ or:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -22,7 +23,7 @@ from .config import Settings
 
 log = logging.getLogger(__name__)
 
-mcp = FastMCP("control4")
+mcp = FastMCP("control4", host="0.0.0.0", port=int(os.getenv("CONTROL4_MCP_PORT", "8000")))
 _settings = Settings.from_env()
 _conn = Control4Connection(_settings)
 
@@ -392,7 +393,8 @@ async def wait_for_event(
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    mcp.run()
+    transport = os.getenv("CONTROL4_MCP_TRANSPORT", "stdio")
+    mcp.run(transport=transport)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

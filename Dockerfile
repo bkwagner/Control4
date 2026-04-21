@@ -12,5 +12,8 @@ COPY src/ ./src/
 
 RUN pip install .
 
-# The MCP protocol runs over stdio; no port to expose.
+EXPOSE 8000
+
+ENV CONTROL4_MCP_TRANSPORT=sse
+
 ENTRYPOINT ["control4-mcp"]
