@@ -3,6 +3,10 @@ export interface Room {
   name: string;
   floorName: string | null;
   floorId: number | null;
+  hasAv: boolean;
+  hasAudio: boolean;
+  hasVideo: boolean;
+  hasMatrixAudio: boolean;
 }
 
 export interface Light {
@@ -14,4 +18,50 @@ export interface Light {
   level: number | null;
   state: number | null;
   dimmable: boolean;
+}
+
+export type SourceKind = "audio" | "video" | "both";
+
+export interface MediaSource {
+  id: number;
+  name: string;
+  proxy: string | null;
+  roomName: string | null;
+  roomIds: number[];
+  kind: SourceKind;
+  matrixAudio: boolean;
+  matrixVideo: boolean;
+  aggregator: boolean;
+}
+
+export type RoomAvMode = "off" | "audio" | "video";
+
+export interface RoomAvState {
+  room_id: number;
+  is_on: boolean;
+  volume: number;
+  muted: boolean;
+  mode: RoomAvMode;
+  audio_source_id: number | null;
+  video_source_id: number | null;
+}
+
+export interface ClimateDevice {
+  id: number;
+  name: string;
+  roomId: number | null;
+  roomName: string | null;
+}
+
+export interface MediaBrowseItem {
+  id: number;
+  label: string;
+  img: string | null;
+}
+
+export interface MediaBrowseGroup {
+  kind: string;
+  label: string;
+  isVideo: boolean;
+  items: MediaBrowseItem[];
 }
