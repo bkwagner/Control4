@@ -9,7 +9,38 @@
     "electron:dev": "tsc -p electron/tsconfig.json && node scripts/dev-electron.mjs",
     "build": "tsc -p electron/tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.bkwagner.control4-app",
+    "productName": "Control4",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Control4"
+    }
   },
   "dependencies": {
     "react": "^19.0.0",
@@ -24,6 +55,7 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.0.0",
+    "electron-builder": "^26.8.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
