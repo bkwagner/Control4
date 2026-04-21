@@ -1,6 +1,6 @@
 {
   "name": "control4-app",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Control4 desktop app (Electron) — talks to the control4-mcp REST API.",
   "main": "dist-electron/main.js",
