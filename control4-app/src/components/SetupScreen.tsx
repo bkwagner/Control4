@@ -45,7 +45,11 @@ export function SetupScreen({ initial, onSaved, onCancel }: Props) {
   }
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-neutral-950 text-neutral-100">
+    <div className="relative flex h-screen w-screen items-center justify-center bg-neutral-950 text-neutral-100">
+      <div
+        className="absolute left-0 right-0 top-0 h-8"
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      />
       <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/60 p-8 shadow-2xl">
         <div className="mb-6">
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-400">

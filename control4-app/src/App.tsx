@@ -224,17 +224,25 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100">
-      <aside className="w-64 shrink-0">
-        <RoomList
-          rooms={visibleRooms}
-          selectedId={selectedRoomId}
-          onSelect={setSelectedRoomId}
-          onRoomOff={handleRoomOff}
-        />
-      </aside>
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-100">
+      {/* Draggable chrome strip. Matches titleBarOverlay height on Windows
+          (32px) so the native min/max/close buttons sit flush with this bar
+          instead of floating over content. */}
+      <div
+        className="h-8 shrink-0 bg-neutral-950"
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      />
+      <div className="flex min-h-0 flex-1">
+        <aside className="w-64 shrink-0">
+          <RoomList
+            rooms={visibleRooms}
+            selectedId={selectedRoomId}
+            onSelect={setSelectedRoomId}
+            onRoomOff={handleRoomOff}
+          />
+        </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-w-0 flex-1 flex-col">
         <header className="border-b border-neutral-800 px-8 pt-5">
           <div className="flex items-center justify-between">
             <div>
@@ -332,6 +340,7 @@ export default function App() {
           ) : null}
         </section>
       </main>
+      </div>
     </div>
   );
 }

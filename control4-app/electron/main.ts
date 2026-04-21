@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, shell } from "electron";
 import path from "node:path";
 
 import { Control4Client } from "./control4/client";
@@ -150,7 +150,15 @@ async function createWindow(): Promise<void> {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#0a0a0a",
-    titleBarStyle: "hiddenInset",
+    // Drop the native title bar. On macOS keep the traffic lights inset;
+    // on Windows draw minimize/maximize/close as an overlay so the app
+    // surface runs edge-to-edge with no chrome strip.
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    titleBarOverlay:
+      process.platform === "win32"
+        ? { color: "#0a0a0a", symbolColor: "#e5e5e5", height: 32 }
+        : undefined,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -158,6 +166,7 @@ async function createWindow(): Promise<void> {
       sandbox: true,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -175,6 +184,11 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // No application menu — keeps the window chrome clean and avoids shipping
+  // the default Electron shortcuts (Ctrl+R reload, DevTools, Zoom, etc.) in
+  // the packaged build. DevTools still opens in dev via the explicit call
+  // below.
+  if (!isDev) Menu.setApplicationMenu(null);
   registerIpc();
   await initClient();
   await createWindow();
