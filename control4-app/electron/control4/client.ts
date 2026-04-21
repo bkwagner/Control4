@@ -991,9 +991,11 @@ export class Control4Client {
     const director = await this.ensureDirector();
     const raw = await director.getAllItems();
     const items = keepLeaves(raw).filter(
-      (it) => String(it.proxy ?? "") === "security",
+      (it) =>
+        String(it.proxy ?? "") === "security" &&
+        !String(it.name ?? "").toLowerCase().includes("partition"),
     );
-    // Filter to only main panels (skip partitions for now, or include all)
+    // Return only main alarm panels, not individual partitions
     return items.map(slimSecurity);
   }
 
