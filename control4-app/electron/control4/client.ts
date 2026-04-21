@@ -953,7 +953,7 @@ export class Control4Client {
 
   async listBlinds(): Promise<BlindDTO[]> {
     const director = await this.ensureDirector();
-    const raw = await director.getItemsByCategory("motorization");
+    const raw = await director.getAllItems();
     const items = keepLeaves(raw).filter(
       (it) => String(it.proxy ?? "") === "blind",
     );
@@ -989,7 +989,7 @@ export class Control4Client {
 
   async listSecurity(): Promise<SecurityDeviceDTO[]> {
     const director = await this.ensureDirector();
-    const raw = await director.getItemsByCategory("security");
+    const raw = await director.getAllItems();
     const items = keepLeaves(raw).filter(
       (it) => String(it.proxy ?? "") === "security",
     );
