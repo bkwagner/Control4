@@ -8,14 +8,11 @@ class Control4API {
   private headers = {};
 
   async setConfig(ip: string, token: string) {
-    // Use HTTP for local/private networks to avoid SSL certificate issues
-    // Private IPs: 10.x, 172.16-31.x, 192.168.x, localhost
-    const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost)/.test(ip);
-    this.baseURL = `${isPrivateIp ? 'http' : 'https'}://${ip}`;
+    this.baseURL = `https://${ip}`;
     this.headers = { 'Authorization': `Bearer ${token}` };
     directorIp = ip;
     directorToken = token;
-    console.log('[API] Config set for:', ip, 'Protocol:', isPrivateIp ? 'HTTP' : 'HTTPS');
+    console.log('[API] Config set for:', ip);
   }
 
   private async request<T>(method: string, path: string, body?: any): Promise<T> {

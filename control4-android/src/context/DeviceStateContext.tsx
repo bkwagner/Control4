@@ -61,12 +61,8 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     if (!config) return;
 
     try {
-      // Use ws:// (unencrypted) for private networks to avoid SSL issues
-      const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost)/.test(config.directorIp);
-      const protocol = isPrivateIp ? 'ws' : 'wss';
-      const wsUrl = `${protocol}://${config.directorIp}/api/v1/items/datatoui`;
-      console.log('Connecting to WebSocket:', wsUrl);
-      const newSocket = io(wsUrl, {
+      console.log('Connecting to WebSocket:', `wss://${config.directorIp}/api/v1/items/datatoui`);
+      const newSocket = io(`wss://${config.directorIp}/api/v1/items/datatoui`, {
         transports: ['websocket'],
         auth: { token: config.password },
         query: { JWT: config.password },
@@ -85,12 +81,11 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
         newSocket.emit('2probe');
 
         try {
-          const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost)/.test(config.directorIp);
           const params = new URLSearchParams({
             JWT: config.password,
             SubscriptionClient: clientId,
           });
-          const url = `${isPrivateIp ? 'http' : 'https'}://${config.directorIp}/api/v1/items/datatoui?${params}`;
+          const url = `https://${config.directorIp}/api/v1/items/datatoui?${params}`;
 
           console.log('Fetching subscription ID from:', url);
           const response = await fetch(url, {
