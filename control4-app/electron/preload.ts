@@ -101,6 +101,9 @@ const api = {
   disarmSecurity: (itemId: number, code: string) =>
     ipcRenderer.invoke("security:disarm", itemId, code),
 
+  // App Info
+  getVersion: () => ipcRenderer.invoke("app:getVersion"),
+
   // Updater
   updater: {
     getState: () => ipcRenderer.invoke("updater:getState"),

@@ -87,6 +87,8 @@ export interface Control4Api {
   armSecurity: (itemId: number, mode: "away" | "stay" | "night") => Promise<void>;
   disarmSecurity: (itemId: number, code: string) => Promise<void>;
 
+  getVersion: () => Promise<string>;
+
   updater: {
     getState: () => Promise<UpdaterState>;
     check: () => Promise<UpdaterState>;

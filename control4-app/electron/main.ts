@@ -182,6 +182,9 @@ function registerIpc(): void {
   ipcMain.handle("security:disarm", async (_e, itemId: number, code: string) =>
     requireClient().disarmSecurity(itemId, code),
   );
+
+  // App Info
+  ipcMain.handle("app:getVersion", async () => app.getVersion());
 }
 
 async function createWindow(): Promise<void> {
