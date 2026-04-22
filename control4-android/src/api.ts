@@ -8,13 +8,14 @@ class Control4API {
   private headers = {};
 
   async setConfig(ip: string, token: string) {
-    // Use localhost HTTP proxy instead of direct HTTPS to avoid SSL certificate issues
-    // The proxy server handles the untrusted HTTPS connection to the Controller
-    this.baseURL = `http://127.0.0.1:8080`;
+    // Use HTTP for local/private networks to avoid SSL certificate issues
+    // Private IPs: 10.x, 172.16-31.x, 192.168.x, localhost
+    const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost)/.test(ip);
+    this.baseURL = `${isPrivateIp ? 'http' : 'https'}://${ip}`;
     this.headers = { 'Authorization': `Bearer ${token}` };
     directorIp = ip;
     directorToken = token;
-    console.log('[API] Config set, using proxy for:', ip);
+    console.log('[API] Config set for:', ip, 'Protocol:', isPrivateIp ? 'HTTP' : 'HTTPS');
   }
 
   private async request<T>(method: string, path: string, body?: any): Promise<T> {
@@ -23,10 +24,6 @@ class Control4API {
     console.log('[API] Config - IP:', directorIp, 'Token exists:', !!directorToken);
 
     try {
-      // Note: In React Native/Expo, fetch doesn't support disabling SSL verification directly
-      // For development with self-signed certs, you need either:
-      // 1. A built APK with network_security_config.xml (production)
-      // 2. Or use a proxy/tunnel that handles the SSL cert
       const response = await fetch(url, {
         method,
         headers: {
@@ -34,7 +31,7 @@ class Control4API {
           ...this.headers,
         },
         body: body ? JSON.stringify(body) : undefined,
-      } as any);
+      });
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText);

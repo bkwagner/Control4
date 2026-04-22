@@ -61,9 +61,11 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     if (!config) return;
 
     try {
-      // Use localhost HTTP proxy for WebSocket to avoid SSL certificate issues
-      const wsUrl = `ws://127.0.0.1:8080/api/v1/items/datatoui`;
-      console.log('Connecting to WebSocket via proxy:', wsUrl);
+      // Use ws:// (unencrypted) for private networks to avoid SSL issues
+      const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost)/.test(config.directorIp);
+      const protocol = isPrivateIp ? 'ws' : 'wss';
+      const wsUrl = `${protocol}://${config.directorIp}/api/v1/items/datatoui`;
+      console.log('Connecting to WebSocket:', wsUrl);
       const newSocket = io(wsUrl, {
         transports: ['websocket'],
         auth: { token: config.password },
@@ -83,12 +85,12 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
         newSocket.emit('2probe');
 
         try {
+          const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost)/.test(config.directorIp);
           const params = new URLSearchParams({
             JWT: config.password,
             SubscriptionClient: clientId,
           });
-          // Use proxy URL instead of direct connection
-          const url = `http://127.0.0.1:8080/api/v1/items/datatoui?${params}`;
+          const url = `${isPrivateIp ? 'http' : 'https'}://${config.directorIp}/api/v1/items/datatoui?${params}`;
 
           console.log('Fetching subscription ID from:', url);
           const response = await fetch(url, {
