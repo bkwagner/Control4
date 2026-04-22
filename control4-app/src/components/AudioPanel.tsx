@@ -439,10 +439,24 @@ export function AudioPanel({
                 </SecondaryButton>
                 <SecondaryButton
                   onClick={() =>
-                    void run("exit", () => api.roomCommand(roomId, "EXIT"))
+                    void run("prev", () => api.roomCommand(roomId, "PREVIOUS"))
                   }
                 >
-                  Exit
+                  Previous
+                </SecondaryButton>
+                <SecondaryButton
+                  onClick={() =>
+                    void run("pgup", () => api.roomCommand(roomId, "PAGE_UP"))
+                  }
+                >
+                  Page Up
+                </SecondaryButton>
+                <SecondaryButton
+                  onClick={() =>
+                    void run("pgdn", () => api.roomCommand(roomId, "PAGE_DOWN"))
+                  }
+                >
+                  Page Down
                 </SecondaryButton>
               </div>
             )}
