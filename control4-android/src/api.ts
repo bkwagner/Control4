@@ -1,16 +1,11 @@
 import axios from 'axios';
 import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, SecurityDevice, ClimateDevice } from './types';
 
-// Disable SSL verification for self-signed certs on LAN
-const httpsAgent = require('https').Agent({
-  rejectUnauthorized: false,
-});
-
 let directorIp: string | null = null;
 let directorToken: string | null = null;
 
+// For React Native, create axios without httpsAgent (handled by platform)
 const api = axios.create({
-  httpsAgent,
   timeout: 10000,
 });
 
