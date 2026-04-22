@@ -61,13 +61,17 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     if (!config) return;
 
     try {
+      console.log('Connecting to WebSocket:', `wss://${config.directorIp}/api/v1/items/datatoui`);
       const newSocket = io(`wss://${config.directorIp}/api/v1/items/datatoui`, {
         transports: ['websocket'],
-        extraHeaders: { JWT: config.password },
+        auth: { token: config.password },
+        query: { JWT: config.password },
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         reconnectionAttempts: 10,
+        rejectUnauthorized: false,
+        forceNew: true,
       } as any);
 
       let subscriptionId: string | null = null;
@@ -83,16 +87,24 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
           });
           const url = `https://${config.directorIp}/api/v1/items/datatoui?${params}`;
 
+          console.log('Fetching subscription ID from:', url);
           const response = await fetch(url, {
             method: 'GET',
             headers: { 'Accept': 'application/json' },
           });
 
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
           const data = (await response.json()) as { subscriptionId?: string };
+          console.log('Subscription response:', data);
           if (data.subscriptionId) {
             subscriptionId = data.subscriptionId;
             newSocket.emit('startSubscription', subscriptionId);
             console.log('Subscription started:', subscriptionId);
+          } else {
+            console.warn('No subscriptionId in response:', data);
           }
         } catch (e) {
           console.error('Failed to get subscription ID:', e);
@@ -117,12 +129,20 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
         }
       });
 
+      newSocket.on('connect', () => {
+        console.log('WebSocket connected to', config.directorIp);
+      });
+
+      newSocket.on('disconnect', (reason: string) => {
+        console.log('WebSocket disconnected:', reason);
+      });
+
       newSocket.on('error', (error: any) => {
-        console.error('WebSocket error:', error);
+        console.error('WebSocket error:', error, JSON.stringify(error));
       });
 
       newSocket.on('connect_error', (error: any) => {
-        console.error('WebSocket connect error:', error);
+        console.error('WebSocket connect_error:', error?.message || error, error?.data);
       });
 
       setSocket(newSocket);
