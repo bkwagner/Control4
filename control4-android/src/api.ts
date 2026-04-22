@@ -31,18 +31,15 @@ class Control4API {
 
     try {
       // First fetch to get the certificate - this accepts any cert
-      const response = await sslPinningFetch({
+      await sslPinningFetch({
         url: certUrl,
         method: 'GET',
         headers: { 'Authorization': `Bearer ${directorToken}` },
-        sslPinning: undefined, // Allow any cert on first fetch
       });
 
-      if (response.status === 401 || response.status === 200) {
-        // Successfully connected, certificate is now implicitly trusted
-        pinnedCertificate = ip;
-        console.log('[API] Certificate pinned for:', ip);
-      }
+      // Successfully connected, certificate is now implicitly trusted
+      pinnedCertificate = ip;
+      console.log('[API] Certificate pinned for:', ip);
     } catch (error) {
       console.warn('[API] Certificate pinning setup failed:', error);
       // Continue anyway - we'll try requests without pinning
@@ -65,13 +62,22 @@ class Control4API {
         sslPinning: pinnedCertificate ? { certs: [pinnedCertificate] } : undefined,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // react-native-ssl-pinning returns response data directly
+      if (typeof response === 'string') {
+        const data = JSON.parse(response);
+        console.log('[API] Response:', 200, url);
+        return data;
       }
 
-      const data = await response.json();
-      console.log('[API] Response:', response.status, url);
-      return data;
+      if (response && typeof response === 'object' && 'body' in response) {
+        const bodyText = response.body;
+        const data = typeof bodyText === 'string' ? JSON.parse(bodyText) : bodyText;
+        console.log('[API] Response:', response.status || 200, url);
+        return data;
+      }
+
+      console.log('[API] Response:', 200, url);
+      return response as T;
     } catch (error) {
       console.error('[API] Error:', error instanceof Error ? error.message : String(error), url);
       throw error;
