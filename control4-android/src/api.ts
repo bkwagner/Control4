@@ -18,6 +18,7 @@ class Control4API {
   private async request<T>(method: string, path: string, body?: any): Promise<T> {
     const url = `${this.baseURL}${path}`;
     console.log('[API] Request:', method, url);
+    console.log('[API] Config - IP:', directorIp, 'Token exists:', !!directorToken);
 
     try {
       const response = await fetch(url, {
@@ -30,14 +31,24 @@ class Control4API {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.text().catch(() => response.statusText);
+        const errorMsg = `HTTP ${response.status}: ${errorText}`;
+        console.error('[API] HTTP Error:', errorMsg, 'URL:', url);
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
-      console.log('[API] Response:', response.status, url);
+      console.log('[API] Response:', response.status, 'Data keys:', Object.keys(data || {}).slice(0, 5));
       return data as T;
     } catch (error) {
-      console.error('[API] Error:', error instanceof Error ? error.message : String(error), url);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('[API] Error Details:', {
+        message: msg,
+        url,
+        method,
+        errorType: error?.constructor?.name,
+        error: JSON.stringify(error),
+      });
       throw error;
     }
   }
