@@ -4,23 +4,35 @@ import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, Security
 let directorIp: string | null = null;
 let directorToken: string | null = null;
 
-// For React Native with self-signed certs, use fetch-based adapter
 const api = axios.create({
   timeout: 10000,
-  httpAgent: {
-    keepAlive: true,
-  } as any,
-  httpsAgent: {
-    keepAlive: true,
-    rejectUnauthorized: false,
-  } as any,
 });
+
+api.interceptors.request.use((config) => {
+  console.log('[API] Request:', config.method?.toUpperCase(), config.baseURL + config.url);
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => {
+    console.log('[API] Response:', response.status, response.config.baseURL + response.config.url);
+    return response;
+  },
+  (error) => {
+    console.error('[API] Error:', error.message, error.code, error.config?.url);
+    if (error.response) {
+      console.error('[API] Response status:', error.response.status);
+    }
+    return Promise.reject(error);
+  }
+);
 
 export function setDirectorConfig(ip: string, token: string) {
   directorIp = ip;
   directorToken = token;
   api.defaults.baseURL = `https://${ip}`;
   api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  console.log('[API] Config set for:', ip);
 }
 
 export async function listRooms(): Promise<Room[]> {
