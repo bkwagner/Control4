@@ -4,9 +4,16 @@ import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, Security
 let directorIp: string | null = null;
 let directorToken: string | null = null;
 
-// For React Native, create axios without httpsAgent (handled by platform)
+// For React Native with self-signed certs, use fetch-based adapter
 const api = axios.create({
   timeout: 10000,
+  httpAgent: {
+    keepAlive: true,
+  } as any,
+  httpsAgent: {
+    keepAlive: true,
+    rejectUnauthorized: false,
+  } as any,
 });
 
 export function setDirectorConfig(ip: string, token: string) {
