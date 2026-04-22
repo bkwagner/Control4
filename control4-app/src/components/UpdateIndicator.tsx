@@ -24,7 +24,7 @@ export function UpdateIndicator() {
 
   if (state.status === "idle" || state.status === "not-available") {
     return version ? (
-      <div className="text-xs text-neutral-500" title={`Control4 v${version}`}>
+      <div className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-400" title={`Control4 v${version}`}>
         v{version}
       </div>
     ) : null;
