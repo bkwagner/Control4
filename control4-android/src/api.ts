@@ -1,11 +1,8 @@
 import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, SecurityDevice, ClimateDevice } from './types';
-import { fetch as sslPinningFetch } from 'react-native-ssl-pinning';
 
 let directorIp: string | null = null;
 let directorToken: string | null = null;
-let pinnedCertificate: string | null = null;
 
-// Use fetch with SSL pinning for self-signed certificate support
 class Control4API {
   private baseURL = '';
   private headers = {};
@@ -16,34 +13,6 @@ class Control4API {
     directorIp = ip;
     directorToken = token;
     console.log('[API] Config set for:', ip);
-
-    // Fetch and pin the certificate on first connection
-    try {
-      await this.pinCertificate(ip);
-    } catch (e) {
-      console.warn('[API] Failed to pin certificate:', e);
-    }
-  }
-
-  private async pinCertificate(ip: string): Promise<void> {
-    const certUrl = `https://${ip}/api/v1/items`;
-    console.log('[API] Fetching certificate from:', certUrl);
-
-    try {
-      // First fetch to get the certificate - this accepts any cert
-      await sslPinningFetch({
-        url: certUrl,
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${directorToken}` },
-      });
-
-      // Successfully connected, certificate is now implicitly trusted
-      pinnedCertificate = ip;
-      console.log('[API] Certificate pinned for:', ip);
-    } catch (error) {
-      console.warn('[API] Certificate pinning setup failed:', error);
-      // Continue anyway - we'll try requests without pinning
-    }
   }
 
   private async request<T>(method: string, path: string, body?: any): Promise<T> {
@@ -51,33 +20,22 @@ class Control4API {
     console.log('[API] Request:', method, url);
 
     try {
-      const response = await sslPinningFetch({
-        url,
+      const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           ...this.headers,
         },
         body: body ? JSON.stringify(body) : undefined,
-        sslPinning: pinnedCertificate ? { certs: [pinnedCertificate] } : undefined,
       });
 
-      // react-native-ssl-pinning returns response data directly
-      if (typeof response === 'string') {
-        const data = JSON.parse(response);
-        console.log('[API] Response:', 200, url);
-        return data;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      if (response && typeof response === 'object' && 'body' in response) {
-        const bodyText = response.body;
-        const data = typeof bodyText === 'string' ? JSON.parse(bodyText) : bodyText;
-        console.log('[API] Response:', response.status || 200, url);
-        return data;
-      }
-
-      console.log('[API] Response:', 200, url);
-      return response as T;
+      const data = await response.json();
+      console.log('[API] Response:', response.status, url);
+      return data as T;
     } catch (error) {
       console.error('[API] Error:', error instanceof Error ? error.message : String(error), url);
       throw error;
