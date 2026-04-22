@@ -731,7 +731,7 @@ function Dpad({
       <button
         aria-label="OK"
         onClick={onSelect}
-        className="flex items-center justify-center bg-accent-500/20 text-accent-100 transition-colors hover:bg-accent-500/30"
+        className="flex cursor-pointer items-center justify-center border border-accent-500/50 bg-accent-500/20 text-accent-100 transition-colors hover:border-accent-400 hover:bg-accent-500/30 active:bg-accent-500/40"
       >
         <span className="text-xs font-semibold tracking-wide">OK</span>
       </button>
