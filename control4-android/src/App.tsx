@@ -2,7 +2,7 @@ import 'react-native-gesture-handler';
 import React from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DeviceStateProvider } from './context/DeviceStateContext';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigationIndependentTree } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View } from 'react-native';
@@ -114,12 +114,14 @@ function AppNavigator() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DeviceStateProvider>
-        <NavigationContainer>
-          <AppNavigator />
-        </NavigationContainer>
-      </DeviceStateProvider>
-    </AuthProvider>
+    <NavigationIndependentTree>
+      <AuthProvider>
+        <DeviceStateProvider>
+          <NavigationContainer>
+            <AppNavigator />
+          </NavigationContainer>
+        </DeviceStateProvider>
+      </AuthProvider>
+    </NavigationIndependentTree>
   );
 }
