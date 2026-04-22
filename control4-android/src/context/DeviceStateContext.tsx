@@ -119,17 +119,23 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
 
       newSocket.on('error', (error: any) => {
         console.error('WebSocket error:', error);
-        setError('WebSocket connection error');
+      });
+
+      newSocket.on('connect_error', (error: any) => {
+        console.error('WebSocket connect error:', error);
       });
 
       setSocket(newSocket);
 
       return () => {
-        newSocket.disconnect();
+        try {
+          newSocket.disconnect();
+        } catch (e) {
+          console.error('Error disconnecting socket:', e);
+        }
       };
     } catch (e) {
       console.error('Failed to setup WebSocket:', e);
-      setError('Failed to setup WebSocket');
     }
   }, [config, refreshItem]);
 
