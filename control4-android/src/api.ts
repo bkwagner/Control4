@@ -1,38 +1,61 @@
-import axios from 'axios';
 import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, SecurityDevice, ClimateDevice } from './types';
 
 let directorIp: string | null = null;
 let directorToken: string | null = null;
 
-const api = axios.create({
-  timeout: 10000,
-});
+// Use fetch API directly to avoid axios issues with React Native SSL handling
+class Control4API {
+  private baseURL = '';
+  private headers = {};
 
-api.interceptors.request.use((config) => {
-  console.log('[API] Request:', config.method?.toUpperCase(), config.baseURL + config.url);
-  return config;
-});
-
-api.interceptors.response.use(
-  (response) => {
-    console.log('[API] Response:', response.status, response.config.baseURL + response.config.url);
-    return response;
-  },
-  (error) => {
-    console.error('[API] Error:', error.message, error.code, error.config?.url);
-    if (error.response) {
-      console.error('[API] Response status:', error.response.status);
-    }
-    return Promise.reject(error);
+  setConfig(ip: string, token: string) {
+    this.baseURL = `https://${ip}`;
+    this.headers = { 'Authorization': `Bearer ${token}` };
+    directorIp = ip;
+    directorToken = token;
+    console.log('[API] Config set for:', ip);
   }
-);
+
+  private async request<T>(method: string, path: string, body?: any): Promise<T> {
+    const url = `${this.baseURL}${path}`;
+    console.log('[API] Request:', method, url);
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.headers,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('[API] Response:', response.status, url);
+      return data;
+    } catch (error) {
+      console.error('[API] Error:', error instanceof Error ? error.message : String(error), url);
+      throw error;
+    }
+  }
+
+  async get<T>(path: string): Promise<T> {
+    return this.request<T>('GET', path);
+  }
+
+  async post<T>(path: string, body: any): Promise<T> {
+    return this.request<T>('POST', path, body);
+  }
+}
+
+const api = new Control4API();
 
 export function setDirectorConfig(ip: string, token: string) {
-  directorIp = ip;
-  directorToken = token;
-  api.defaults.baseURL = `https://${ip}`;
-  api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-  console.log('[API] Config set for:', ip);
+  api.setConfig(ip, token);
 }
 
 export async function listRooms(): Promise<Room[]> {

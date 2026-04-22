@@ -41,14 +41,7 @@
           }
         }
       ],
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "networkSecurityConfig": "./android/app/src/main/res/xml/network_security_config.xml"
-          }
-        }
-      ]
+      "./plugins/with-network-security-config.js"
     ],
     "extra": {
       "eas": {
