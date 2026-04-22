@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { AppConfig } from '../types';
 import { apiClient } from '../api';
+import { startProxy } from '../proxy-server';
 
 type AuthContextType = {
   config: AppConfig | null;
@@ -26,6 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const stored = await SecureStore.getItemAsync('control4_config');
         if (stored) {
           const parsed = JSON.parse(stored) as AppConfig;
+          // Start proxy server before setting up API client
+          await startProxy(parsed.directorIp);
           setConfigState(parsed);
           await apiClient.setDirectorConfig(parsed.directorIp, parsed.password);
         }
@@ -43,6 +46,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const setConfig = async (newConfig: AppConfig) => {
     try {
       setError(null);
+      // Start proxy server for the new Director IP
+      await startProxy(newConfig.directorIp);
       await SecureStore.setItemAsync('control4_config', JSON.stringify(newConfig));
       setConfigState(newConfig);
       await apiClient.setDirectorConfig(newConfig.directorIp, newConfig.password);
