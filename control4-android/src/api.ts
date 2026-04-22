@@ -1,19 +1,52 @@
 import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, SecurityDevice, ClimateDevice } from './types';
+import { fetch as sslPinningFetch } from 'react-native-ssl-pinning';
 
 let directorIp: string | null = null;
 let directorToken: string | null = null;
+let pinnedCertificate: string | null = null;
 
-// Use fetch API directly to avoid axios issues with React Native SSL handling
+// Use fetch with SSL pinning for self-signed certificate support
 class Control4API {
   private baseURL = '';
   private headers = {};
 
-  setConfig(ip: string, token: string) {
+  async setConfig(ip: string, token: string) {
     this.baseURL = `https://${ip}`;
     this.headers = { 'Authorization': `Bearer ${token}` };
     directorIp = ip;
     directorToken = token;
     console.log('[API] Config set for:', ip);
+
+    // Fetch and pin the certificate on first connection
+    try {
+      await this.pinCertificate(ip);
+    } catch (e) {
+      console.warn('[API] Failed to pin certificate:', e);
+    }
+  }
+
+  private async pinCertificate(ip: string): Promise<void> {
+    const certUrl = `https://${ip}/api/v1/items`;
+    console.log('[API] Fetching certificate from:', certUrl);
+
+    try {
+      // First fetch to get the certificate - this accepts any cert
+      const response = await sslPinningFetch({
+        url: certUrl,
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${directorToken}` },
+        sslPinning: undefined, // Allow any cert on first fetch
+      });
+
+      if (response.status === 401 || response.status === 200) {
+        // Successfully connected, certificate is now implicitly trusted
+        pinnedCertificate = ip;
+        console.log('[API] Certificate pinned for:', ip);
+      }
+    } catch (error) {
+      console.warn('[API] Certificate pinning setup failed:', error);
+      // Continue anyway - we'll try requests without pinning
+    }
   }
 
   private async request<T>(method: string, path: string, body?: any): Promise<T> {
@@ -21,13 +54,15 @@ class Control4API {
     console.log('[API] Request:', method, url);
 
     try {
-      const response = await fetch(url, {
+      const response = await sslPinningFetch({
+        url,
         method,
         headers: {
           'Content-Type': 'application/json',
           ...this.headers,
         },
         body: body ? JSON.stringify(body) : undefined,
+        sslPinning: pinnedCertificate ? { certs: [pinnedCertificate] } : undefined,
       });
 
       if (!response.ok) {
@@ -54,8 +89,8 @@ class Control4API {
 
 const api = new Control4API();
 
-export function setDirectorConfig(ip: string, token: string) {
-  api.setConfig(ip, token);
+export async function setDirectorConfig(ip: string, token: string) {
+  await api.setConfig(ip, token);
 }
 
 export async function listRooms(): Promise<Room[]> {

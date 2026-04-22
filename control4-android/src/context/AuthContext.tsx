@@ -27,7 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (stored) {
           const parsed = JSON.parse(stored) as AppConfig;
           setConfigState(parsed);
-          apiClient.setDirectorConfig(parsed.directorIp, parsed.password);
+          await apiClient.setDirectorConfig(parsed.directorIp, parsed.password);
         }
       } catch (e) {
         console.error('Failed to load config:', e);
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       await SecureStore.setItemAsync('control4_config', JSON.stringify(newConfig));
       setConfigState(newConfig);
-      apiClient.setDirectorConfig(newConfig.directorIp, newConfig.password);
+      await apiClient.setDirectorConfig(newConfig.directorIp, newConfig.password);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Failed to save config';
       setError(errorMsg);
