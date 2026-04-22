@@ -461,7 +461,7 @@ export function AudioPanel({
                 void run("right", () => api.roomCommand(roomId, "RIGHT"))
               }
               onSelect={() =>
-                void run("ok", () => api.roomCommand(roomId, "OK"))
+                void run("ok", () => api.roomCommand(roomId, "ENTER"))
               }
             />
           )}
