@@ -13,6 +13,25 @@ type DeviceStateContextType = {
   refreshAllItems: (itemIds: number[]) => Promise<void>;
 };
 
+// Every variable name the screens read from `states`. Keep in sync when a
+// screen starts reading a new variable.
+const DISPLAY_VARS = [
+  'LIGHT_LEVEL',
+  'LIGHT_STATE',
+  'LEVEL',
+  'CURRENT_LEVEL',
+  'HVAC_MODE',
+  'TEMPERATURE_F',
+  'HEAT_SETPOINT_F',
+  'COOL_SETPOINT_F',
+  'LOCK_STATE',
+  'LOCKED_STATE',
+  'LOCKSTATE',
+  'LockState',
+  'ALARM_STATE',
+  'PARTITION_STATE',
+];
+
 const DeviceStateContext = createContext<DeviceStateContextType | undefined>(undefined);
 
 export function DeviceStateProvider({ children }: { children: React.ReactNode }) {
@@ -38,22 +57,22 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     }
   }, []);
 
+  // Refreshing several items (a whole screen) reads just the variables the
+  // screens display, for every item, in one batched request instead of one
+  // full read per item. A single item (after an action or event) keeps the
+  // full per-item read.
   const refreshAllItems = useCallback(async (itemIds: number[]) => {
+    if (itemIds.length === 1) {
+      await refreshItem(itemIds[0]);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-      const results = await Promise.all(
-        itemIds.map(async (id) => {
-          try {
-            return [id, await apiClient.getItemVariables(id)] as const;
-          } catch {
-            return [id, [] as ItemVariable[]] as const;
-          }
-        }),
-      );
+      const byItem = await apiClient.getVariablesForItems(itemIds, DISPLAY_VARS);
       setStates((prev) => {
         const next = new Map(prev);
-        for (const [id, vars] of results) next.set(id, vars);
+        for (const [id, vars] of byItem) next.set(id, vars);
         return next;
       });
     } catch (e) {
@@ -63,7 +82,7 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshItem]);
 
   // WebSocket connection setup
   useEffect(() => {

@@ -82,29 +82,85 @@ export async function listRooms(): Promise<Room[]> {
     }));
 }
 
+// Values of the named variables for every item that has them, in one
+// request (the director ignores id filters on this endpoint, so callers
+// filter the rows themselves).
+export async function getVariablesByName(
+  varNames: string[],
+): Promise<Array<ItemVariable & { id: number }>> {
+  const names = varNames.map(encodeURIComponent).join(',');
+  return api.get<Array<ItemVariable & { id: number }>>(`/api/v1/items/variables?varnames=${names}`);
+}
+
+// Parent of each item. Proxy devices (e.g. a blind) often don't own their
+// state variables — the parent protocol driver does, and a per-item read of
+// the proxy silently returns the parent's rows. The batched read reports
+// rows under the real owner, so callers map proxies back through this.
+// Cached: the tree only changes when the project is edited.
+const PARENTS_TTL_MS = 5 * 60_000;
+let parentsCache: { at: number; map: Promise<Map<number, number>> } | null = null;
+
+function getParentMap(): Promise<Map<number, number>> {
+  if (parentsCache && Date.now() - parentsCache.at < PARENTS_TTL_MS) return parentsCache.map;
+  const map = api.get<any[]>('/api/v1/items').then((items) => {
+    const m = new Map<number, number>();
+    for (const it of items) if (typeof it.parentId === 'number') m.set(it.id, it.parentId);
+    return m;
+  });
+  const entry = { at: Date.now(), map };
+  parentsCache = entry;
+  map.catch(() => {
+    if (parentsCache === entry) parentsCache = null;
+  });
+  return map;
+}
+
+// The named variables for each requested item, in two requests total
+// regardless of item count. Matches what per-item reads return: the item's
+// own values, falling back to its parent's for names it doesn't own.
+export async function getVariablesForItems(
+  itemIds: number[],
+  varNames: string[],
+): Promise<Map<number, ItemVariable[]>> {
+  const [rows, parents] = await Promise.all([getVariablesByName(varNames), getParentMap()]);
+  const byOwner = new Map<number, Map<string, unknown>>();
+  for (const row of rows) {
+    if (!byOwner.has(row.id)) byOwner.set(row.id, new Map());
+    byOwner.get(row.id)!.set(row.varName, row.value);
+  }
+  const out = new Map<number, ItemVariable[]>();
+  for (const id of itemIds) {
+    const merged = new Map(byOwner.get(parents.get(id) ?? -1) ?? []);
+    for (const [name, value] of byOwner.get(id) ?? []) merged.set(name, value);
+    out.set(id, [...merged].map(([varName, value]) => ({ varName, value })));
+  }
+  return out;
+}
+
 export async function listLights(): Promise<Light[]> {
-  const data = await api.get<any[]>('/api/v1/categories/lights');
-  const results = await Promise.all(
-    data.map(async (item: any) => {
-      try {
-        const vars = await getItemVariables(item.id);
-        const levelVar = vars.find((v) => v.varName === 'LIGHT_LEVEL');
-        const stateVar = vars.find((v) => v.varName === 'LIGHT_STATE');
-        return {
-          id: item.id,
-          name: item.name,
-          roomId: item.roomId || null,
-          roomName: item.roomName || null,
-          level: levelVar && typeof levelVar.value === 'number' ? levelVar.value : null,
-          state: stateVar && typeof stateVar.value === 'number' ? stateVar.value : null,
-          dimmable: !!levelVar,
-        } as Light;
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return results.filter((l): l is Light => l !== null);
+  const [data, rows] = await Promise.all([
+    api.get<any[]>('/api/v1/categories/lights'),
+    getVariablesByName(['LIGHT_LEVEL', 'LIGHT_STATE']),
+  ]);
+  const values = new Map<number, Map<string, unknown>>();
+  for (const row of rows) {
+    if (!values.has(row.id)) values.set(row.id, new Map());
+    values.get(row.id)!.set(row.varName, row.value);
+  }
+  return data.map((item: any) => {
+    const vars = values.get(item.id);
+    const level = vars?.get('LIGHT_LEVEL');
+    const state = vars?.get('LIGHT_STATE');
+    return {
+      id: item.id,
+      name: item.name,
+      roomId: item.roomId || null,
+      roomName: item.roomName || null,
+      level: typeof level === 'number' ? level : null,
+      state: typeof state === 'number' ? state : null,
+      dimmable: vars?.has('LIGHT_LEVEL') ?? false,
+    } as Light;
+  });
 }
 
 export async function listBlinds(): Promise<BlindDevice[]> {
@@ -323,6 +379,8 @@ export const apiClient = {
   listClimate,
   listRoomDevices,
   getItemVariables,
+  getVariablesByName,
+  getVariablesForItems,
   setLightLevel,
   setBlindLevel,
   openBlind,
