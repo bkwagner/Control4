@@ -15,8 +15,16 @@ const isDev = process.env.NODE_ENV === "development";
 let client: Control4Client | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+function makeClient(settings: Settings): Control4Client {
+  // Persist the director cert the first time the client pins it.
+  return new Control4Client(settings, (certPem) =>
+    saveSettings({ ...settings, directorCertPem: certPem }),
+  );
+}
+
 function resetClient(settings: Settings | null): void {
-  client = settings ? new Control4Client(settings) : null;
+  client?.close();
+  client = settings ? makeClient(settings) : null;
 }
 
 async function initClient(): Promise<Settings | null> {
@@ -41,15 +49,53 @@ function startEventListener(): void {
 
 function registerIpc(): void {
   // Config
-  ipcMain.handle("config:get", async () => loadSettings());
-  ipcMain.handle("config:save", async (_e, next: Settings) => {
-    await saveSettings(next);
-    resetClient(next);
-    // Validate by forcing an auth round-trip.
-    await requireClient().healthCheck();
-    startEventListener();
-    return true;
+  // The renderer never receives the stored password; an empty password on
+  // save means "keep the current one".
+  ipcMain.handle("config:get", async () => {
+    const s = await loadSettings();
+    if (!s) return null;
+    return {
+      username: s.username,
+      password: "",
+      directorIp: s.directorIp,
+      controllerCommonName: s.controllerCommonName,
+    };
   });
+  ipcMain.handle(
+    "config:save",
+    async (
+      _e,
+      next: Pick<Settings, "username" | "password" | "directorIp" | "controllerCommonName">,
+    ) => {
+      const existing = await loadSettings();
+      const password = next.password || existing?.password || "";
+      if (!password) throw new Error("Password is required.");
+      // Re-saving settings is the explicit "trust this director" action, so
+      // the cert is re-pinned (handles a replaced controller).
+      const candidate: Settings = {
+        username: next.username,
+        password,
+        directorIp: next.directorIp,
+        controllerCommonName: next.controllerCommonName ?? null,
+        directorCertPem: null,
+      };
+      // Validate with a fresh client before persisting anything, so bad
+      // credentials never replace working ones. On success it becomes the
+      // live client (it has already pinned the cert into `candidate`).
+      const trial = new Control4Client(candidate);
+      try {
+        await trial.healthCheck();
+      } catch (err) {
+        trial.close();
+        throw err;
+      }
+      await saveSettings(candidate);
+      client?.close();
+      client = trial;
+      startEventListener();
+      return true;
+    },
+  );
   ipcMain.handle("config:clear", async () => {
     await clearSettings();
     resetClient(null);
@@ -213,7 +259,7 @@ async function createWindow(): Promise<void> {
   mainWindow.setMenuBarVisibility(false);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 

@@ -1,19 +1,75 @@
 // Local director HTTP client. The controller ships a self-signed cert, so we
-// use a node:https Agent with rejectUnauthorized:false. This only reaches the
-// configured LAN IP.
+// pin it: on first connect we record the cert (trust on first use), then
+// every connection trusts exactly that cert as its CA and must present the
+// same SHA-256 fingerprint. A different device answering on the director IP
+// is rejected before any bearer token is sent.
 
 import * as https from "node:https";
+import * as tls from "node:tls";
+import { X509Certificate } from "node:crypto";
 import { URL } from "node:url";
+
+export class DirectorCertMismatchError extends Error {
+  constructor(expected: string, actual: string) {
+    super(
+      `Director certificate changed (expected ${expected}, got ${actual}). ` +
+        "If you replaced the controller, open Settings and save again to trust the new certificate.",
+    );
+    this.name = "DirectorCertMismatchError";
+  }
+}
+
+export function certFingerprint(pem: string): string {
+  return new X509Certificate(pem).fingerprint256;
+}
+
+// Read the director's certificate without sending anything else. Used once
+// to establish the pin.
+export function fetchDirectorCertPem(ip: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect(
+      { host: ip, port: 443, rejectUnauthorized: false, timeout: 10_000 },
+      () => {
+        const raw = socket.getPeerCertificate().raw;
+        socket.end();
+        if (!raw) {
+          reject(new Error("Director presented no certificate"));
+          return;
+        }
+        const b64 = raw.toString("base64").match(/.{1,64}/g)!.join("\n");
+        resolve(`-----BEGIN CERTIFICATE-----\n${b64}\n-----END CERTIFICATE-----\n`);
+      },
+    );
+    socket.on("error", reject);
+    socket.on("timeout", () => socket.destroy(new Error("Director TLS probe timeout")));
+  });
+}
+
+// https.Agent that only accepts the pinned self-signed certificate. The
+// hostname check is replaced by a fingerprint comparison because the cert's
+// CN is the controller name, not its LAN IP.
+export function createPinnedAgent(certPem: string): https.Agent {
+  const expected = certFingerprint(certPem);
+  return new https.Agent({
+    keepAlive: true,
+    ca: certPem,
+    rejectUnauthorized: true,
+    checkServerIdentity: (_host, cert) =>
+      cert.fingerprint256 === expected
+        ? undefined
+        : new DirectorCertMismatchError(expected, cert.fingerprint256),
+  });
+}
 
 export class Director {
   private readonly ip: string;
   private readonly bearer: string;
   private readonly agent: https.Agent;
 
-  constructor(ip: string, directorBearerToken: string) {
+  constructor(ip: string, directorBearerToken: string, agent: https.Agent) {
     this.ip = ip;
     this.bearer = directorBearerToken;
-    this.agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
+    this.agent = agent;
   }
 
   private async request<T>(
@@ -129,9 +185,9 @@ export class Director {
     return value as T;
   }
 
-  close(): void {
-    this.agent.destroy();
-  }
+  // The agent is owned by Control4Client and shared with the websocket, so
+  // closing a Director (on token refresh) must not tear it down.
+  close(): void {}
 }
 
 export interface DirectorItem {

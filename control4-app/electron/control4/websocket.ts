@@ -1,18 +1,30 @@
-import * as https from "node:https";
-import { io, Socket } from "socket.io-client";
+// Director item-change feed. The Director speaks the legacy Socket.IO v2
+// protocol (Engine.IO 3), so this uses socket.io-client 2.x — v3+ clients
+// can't talk to it at all. Handshake mirrors pyControl4:
+//   connect on the ROOT namespace -> director emits `clientId` ->
+//   GET a subscriptionId from SUBSCRIPTION_PATH -> emit `startSubscription`
+//   -> item updates arrive as events named after the subscriptionId.
+// Note the director rejects SUBSCRIPTION_PATH as a socket.io namespace
+// ("Invalid namespace"); it is only an HTTP endpoint.
 
-const NAMESPACE = "/api/v1/items/datatoui";
+import * as https from "node:https";
+import io from "socket.io-client";
+
+const SUBSCRIPTION_PATH = "/api/v1/items/datatoui";
 
 export type ItemChangedCallback = (itemId: number) => void;
 
 export class Control4WebSocket {
-  private socket: Socket | null = null;
+  private socket: SocketIOClient.Socket | null = null;
   private subscriptionId: string | null = null;
   private callbacks: Set<ItemChangedCallback> = new Set();
 
   constructor(
     private readonly ip: string,
     private readonly token: string,
+    // Pinned director agent (see director.ts) — used for both the socket and
+    // the subscription fetch so neither ever trusts an unpinned cert.
+    private readonly agent: https.Agent,
   ) {}
 
   onItemChanged(cb: ItemChangedCallback): () => void {
@@ -21,36 +33,50 @@ export class Control4WebSocket {
   }
 
   connect(): void {
-    this.socket = io(`wss://${this.ip}${NAMESPACE}`, {
+    const socket = io(`wss://${this.ip}`, {
       transports: ["websocket"],
-      extraHeaders: { JWT: this.token },
-      rejectUnauthorized: false,
+      // forceNode: engine.io-client 3 otherwise prefers a global WebSocket
+      // (present in newer Node/Electron), which ignores headers and agent.
+      // The typings only describe the browser options.
+      ...({ forceNode: true, extraHeaders: { JWT: this.token }, agent: this.agent } as object),
       autoConnect: false,
+      forceNew: true,
+    });
+    this.socket = socket;
+
+    socket.on("disconnect", () => {
+      // The subscription dies with the connection; a fresh one is requested
+      // when the director sends a new clientId after reconnect.
+      if (this.subscriptionId) socket.off(this.subscriptionId);
+      this.subscriptionId = null;
     });
 
-    this.socket.on("clientId", (clientId: string) => {
-      this.socket?.emit("2probe");
-      void this.handshake(clientId);
+    socket.on("clientId", (clientId: string) => {
+      socket.emit("2probe");
+      if (this.subscriptionId) return;
+      this.handshake(socket, clientId).catch((err: unknown) => {
+        console.warn("[ws] subscription handshake failed; retrying in 5s", err);
+        setTimeout(() => {
+          if (this.socket === socket) socket.disconnect().connect();
+        }, 5_000);
+      });
     });
 
-    this.socket.onAny((event: string, message: unknown) => {
-      if (event !== this.subscriptionId) return;
-      this.handleMessage(message);
-    });
-
-    this.socket.connect();
+    socket.connect();
   }
 
-  private async handshake(clientId: string): Promise<void> {
+  private async handshake(socket: SocketIOClient.Socket, clientId: string): Promise<void> {
     const subId = await this.fetchSubscriptionId(clientId);
+    if (this.socket !== socket) return;
     this.subscriptionId = subId;
-    this.socket?.emit("startSubscription", subId);
+    socket.on(subId, (message: unknown) => this.handleMessage(message));
+    socket.emit("startSubscription", subId);
   }
 
   private fetchSubscriptionId(clientId: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const path =
-        `/api/v1/items/datatoui` +
+        `${SUBSCRIPTION_PATH}` +
         `?JWT=${encodeURIComponent(this.token)}` +
         `&SubscriptionClient=${encodeURIComponent(clientId)}`;
       const req = https.request(
@@ -59,7 +85,7 @@ export class Control4WebSocket {
           port: 443,
           path,
           method: "GET",
-          rejectUnauthorized: false,
+          agent: this.agent,
           timeout: 10_000,
         },
         (res) => {
@@ -103,8 +129,9 @@ export class Control4WebSocket {
   }
 
   disconnect(): void {
-    this.socket?.disconnect();
+    const socket = this.socket;
     this.socket = null;
     this.subscriptionId = null;
+    socket?.disconnect();
   }
 }

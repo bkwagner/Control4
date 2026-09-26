@@ -22,8 +22,13 @@ export function SetupScreen({ initial, onSaved, onCancel }: Props) {
     }
   }, [initial]);
 
+  // Editing existing settings: the stored password is never sent to the
+  // renderer, and leaving the field blank keeps it.
   const canSubmit =
-    username.trim() && password.trim() && directorIp.trim() && !saving;
+    username.trim() &&
+    (password.trim() || initial) &&
+    directorIp.trim() &&
+    !saving;
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -93,6 +98,7 @@ export function SetupScreen({ initial, onSaved, onCancel }: Props) {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder={initial ? "Unchanged" : undefined}
               className="input"
             />
           </Field>

@@ -3,8 +3,10 @@
 // 1:1 to what the Electron preload bridge exposes to the renderer.
 
 import type { Settings } from "./config";
+import type * as https from "node:https";
+
 import type { DirectorBinding, DirectorItem, DirectorVariable } from "./director";
-import { Director } from "./director";
+import { createPinnedAgent, Director, fetchDirectorCertPem } from "./director";
 import {
   getAccountBearerToken,
   getAccountControllers,
@@ -482,8 +484,37 @@ export class Control4Client {
   private directorToken: string | null = null;
   private ws: Control4WebSocket | null = null;
   private wsCallback: ((itemId: number) => void) | null = null;
+  private agent: https.Agent | null = null;
+  private closed = false;
 
-  constructor(private readonly settings: Settings) {}
+  constructor(
+    private readonly settings: Settings,
+    // Called once when the director cert is first pinned so the caller can
+    // persist it. Not called when a pin already exists.
+    private readonly onCertPinned: (certPem: string) => Promise<void> = async () => {},
+  ) {}
+
+  // Tear down sockets and the websocket. The client must not be used after.
+  close(): void {
+    this.closed = true;
+    this.stopEventListener();
+    this.director?.close();
+    this.director = null;
+    this.agent?.destroy();
+    this.agent = null;
+  }
+
+  private async ensureAgent(): Promise<https.Agent> {
+    if (this.agent) return this.agent;
+    let pem = this.settings.directorCertPem;
+    if (!pem) {
+      pem = await fetchDirectorCertPem(this.settings.directorIp);
+      this.settings.directorCertPem = pem;
+      await this.onCertPinned(pem);
+    }
+    this.agent = createPinnedAgent(pem);
+    return this.agent;
+  }
 
   // Lazily (re)connect to the director when the token is missing or near
   // expiry. Callers just use `ensureDirector()` and stop worrying about it.
@@ -519,13 +550,16 @@ export class Control4Client {
     const token: DirectorToken = await this.retry(() =>
       getDirectorBearerToken(accountToken, commonName),
     );
-    const director = new Director(this.settings.directorIp, token.token);
+    const agent = await this.ensureAgent();
+    if (this.closed) throw new Error("Client closed");
+    const director = new Director(this.settings.directorIp, token.token, agent);
     this.director = director;
     this.tokenExpiresAt = token.expiresAt;
     this.directorToken = token.token;
-    if (this.ws && this.wsCallback) {
-      this.ws.disconnect();
-      this.ws = null;
+    // (Re)start the websocket with the fresh token. A listener registered
+    // before the first connect (the normal app-launch path) only stored its
+    // callback, so this is also where it first comes up.
+    if (this.wsCallback) {
       this.startEventListener(this.wsCallback);
     }
     return director;
@@ -559,11 +593,19 @@ export class Control4Client {
     return { status: "ok" };
   }
 
+  // Safe to call before the first connect: the callback is stored and the
+  // socket comes up as soon as connect() has a token. Also kicks off that
+  // connect so live updates don't wait for the first UI request.
   startEventListener(onItemChanged: (itemId: number) => void): void {
     this.wsCallback = onItemChanged;
-    if (!this.directorToken) return;
+    if (!this.directorToken || !this.agent) {
+      this.ensureDirector().catch(() => {
+        // Surfaced to the UI by its own requests; nothing to do here.
+      });
+      return;
+    }
     this.ws?.disconnect();
-    this.ws = new Control4WebSocket(this.settings.directorIp, this.directorToken);
+    this.ws = new Control4WebSocket(this.settings.directorIp, this.directorToken, this.agent);
     this.ws.onItemChanged(onItemChanged);
     this.ws.connect();
   }
