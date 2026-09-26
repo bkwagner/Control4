@@ -95,6 +95,18 @@ CONTROL4_MCP_TRANSPORT=sse CONTROL4_MCP_PORT=8000 uv run control4-mcp
 # REST API:  http://localhost:8000/api/health
 ```
 
+Security:
+
+- The SSE server binds to `127.0.0.1` by default. Set `CONTROL4_MCP_HOST`
+  (e.g. `0.0.0.0`) to expose it on the LAN — the server then **refuses to
+  start** unless `CONTROL4_MCP_TOKEN` is set.
+- With a token, every request (MCP and `/api/*`, except `/api/health`) needs
+  `Authorization: Bearer <token>`.
+- No CORS headers are sent, so web pages can't call the API from a browser.
+  Allow specific origins with `CONTROL4_API_CORS_ORIGINS=https://a,https://b`.
+- `send_command` refuses `UNLOCK`, `DISARM`, and `ARM_*` unless
+  `CONTROL4_ALLOW_SECURITY=1`.
+
 Endpoints:
 
 | Method | Path                                   | Purpose                          |
@@ -156,6 +168,7 @@ Wire the MCP client to `docker run` the image (stdio transport):
       "args": [
         "run", "-i", "--rm",
         "--env-file", "/absolute/path/to/.env",
+        "-e", "CONTROL4_MCP_TRANSPORT=stdio",
         "--network", "host",
         "control4-mcp:latest"
       ]
@@ -170,7 +183,10 @@ Notes:
 - `--network host` is the easy button on Linux. On macOS/Windows Docker
   Desktop, drop that flag and use bridge networking — your director's LAN IP
   is still routable from the Docker VM.
-- Smoke test: `npx @modelcontextprotocol/inspector docker run -i --rm --env-file .env --network host control4-mcp:latest`
+- The image defaults to the SSE transport (`docker compose up`), which
+  requires `CONTROL4_MCP_TOKEN` in `.env`; the `-e CONTROL4_MCP_TRANSPORT=stdio`
+  above switches it to stdio for spawned clients.
+- Smoke test: `npx @modelcontextprotocol/inspector docker run -i --rm --env-file .env -e CONTROL4_MCP_TRANSPORT=stdio --network host control4-mcp:latest`
 
 On Docker Desktop for Windows, forward slashes in JSON paths (or escaped
 backslashes) work; `--network host` is optional but needs explicit enabling

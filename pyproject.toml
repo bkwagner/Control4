@@ -6,8 +6,9 @@ requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT" }
 dependencies = [
-    "mcp[cli]>=1.2.0",
-    "pyControl4>=1.2.0",
+    # mcp 2.x renamed FastMCP -> MCPServer; pin until the server is migrated.
+    "mcp[cli]>=1.2.0,<2",
+    "pyControl4>=2.0,<3",
     "aiohttp>=3.9",
     "python-dotenv>=1.0",
     "fastapi>=0.115",

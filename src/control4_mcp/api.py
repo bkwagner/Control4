@@ -7,6 +7,7 @@ Node, the Electron app keeps working as long as the routes match.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -40,14 +41,16 @@ class SourcePayload(BaseModel):
 def create_api(conn: Control4Connection) -> FastAPI:
     app = FastAPI(title="Control4 App API", version="0.1.0")
 
-    # Electron loads over file:// in prod and http://localhost:5173 in dev.
-    # Permissive CORS is fine because the API only binds to localhost.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # No CORS middleware on purpose: browsers on other origins must not be
+    # able to drive this API. Extra trusted origins can be allowed explicitly.
+    origins = [o.strip() for o in os.getenv("CONTROL4_API_CORS_ORIGINS", "").split(",") if o.strip()]
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str]:

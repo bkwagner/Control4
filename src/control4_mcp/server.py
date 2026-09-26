@@ -23,9 +23,23 @@ from .config import Settings
 
 log = logging.getLogger(__name__)
 
-mcp = FastMCP("control4", host="0.0.0.0", port=int(os.getenv("CONTROL4_MCP_PORT", "8000")))
+_HOST = os.getenv("CONTROL4_MCP_HOST", "127.0.0.1")
+_PORT = int(os.getenv("CONTROL4_MCP_PORT", "8000"))
+
+mcp = FastMCP("control4", host=_HOST, port=_PORT)
 _settings = Settings.from_env()
 _conn = Control4Connection(_settings)
+
+# Commands that unlock doors or change alarm state. The generic escape hatch
+# refuses these unless explicitly enabled, so an LLM (or anyone who reaches
+# the SSE endpoint) can't disarm the house through `send_command`.
+_SECURITY_COMMANDS = {"UNLOCK", "DISARM", "DISARM_PARTITION"}
+_SECURITY_COMMAND_PREFIXES = ("ARM_", "PARTITION_")
+
+
+def _is_security_command(command: str) -> bool:
+    c = command.strip().upper()
+    return c in _SECURITY_COMMANDS or c.startswith(_SECURITY_COMMAND_PREFIXES)
 
 
 def _slim(it: dict[str, Any]) -> dict[str, Any]:
@@ -128,8 +142,13 @@ async def toggle_light(item_id: int) -> str:
     """Toggle a light on/off based on its current level."""
     director = await _conn.director()
     light = C4Light(director, item_id)
-    current = await light.get_level()
-    target = 0 if int(current or 0) > 0 else 100
+    # Non-dimming switches have no LIGHT_LEVEL; fall back to LIGHT_STATE.
+    try:
+        current = await light.get_level()
+    except Exception:  # noqa: BLE001
+        current = None
+    is_on = int(current) > 0 if current is not None else bool(await light.get_state())
+    target = 0 if is_on else 100
     await light.set_level(target)
     return f"ok: item {item_id} toggled to {target}"
 
@@ -201,7 +220,15 @@ async def send_command(
         item_id: Target item id.
         command: Command name (e.g. "OPEN", "CLOSE", "SELECT_VIDEO_DEVICE").
         params: Optional parameters dict for the command.
+
+    Lock-opening and alarm commands (UNLOCK, DISARM, ARM_*) are refused
+    unless the server runs with CONTROL4_ALLOW_SECURITY=1.
     """
+    if _is_security_command(command) and os.getenv("CONTROL4_ALLOW_SECURITY") != "1":
+        return (
+            f"refused: {command} is a security command; set "
+            "CONTROL4_ALLOW_SECURITY=1 on the server to allow it"
+        )
     director = await _conn.director()
     await director.send_post_request(
         f"/api/v1/items/{item_id}/commands",
@@ -391,30 +418,79 @@ async def wait_for_event(
     return ev.to_dict() if ev else None
 
 
+def _is_loopback(host: str) -> bool:
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
+def _bearer_auth(app: Any, token: str) -> Any:
+    """ASGI middleware: require `Authorization: Bearer <token>` on every
+    HTTP request except the unauthenticated liveness probe."""
+    import hmac
+
+    expected = f"Bearer {token}".encode()
+
+    async def middleware(scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or scope.get("path") == "/api/health":
+            await app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        supplied = headers.get(b"authorization", b"")
+        if not hmac.compare_digest(supplied, expected):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": b'{"detail":"unauthorized"}'})
+            return
+        await app(scope, receive, send)
+
+    return middleware
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     transport = os.getenv("CONTROL4_MCP_TRANSPORT", "stdio")
 
-    if transport == "sse":
-        # Mount FastAPI under /api alongside the MCP SSE endpoint on the same
-        # uvicorn instance. Electron frontend hits /api/*; MCP clients hit /sse.
-        import uvicorn
-        from starlette.applications import Starlette
-        from starlette.routing import Mount
-
-        from .api import create_api
-
-        port = int(os.getenv("CONTROL4_MCP_PORT", "8000"))
-        combined = Starlette(
-            routes=[
-                Mount("/api", app=create_api(_conn)),
-                Mount("/", app=mcp.sse_app()),
-            ]
-        )
-        uvicorn.run(combined, host="0.0.0.0", port=port)
+    if transport == "stdio":
+        mcp.run(transport="stdio")
         return
 
-    mcp.run(transport=transport)  # type: ignore[arg-type]
+    if transport != "sse":
+        raise SystemExit(f"Unsupported CONTROL4_MCP_TRANSPORT={transport!r}; use 'stdio' or 'sse'.")
+
+    token = os.getenv("CONTROL4_MCP_TOKEN", "")
+    if not token and not _is_loopback(_HOST):
+        raise SystemExit(
+            f"Refusing to listen on {_HOST} without CONTROL4_MCP_TOKEN. "
+            "Anyone who can reach this port could control the house. Set a "
+            "long random CONTROL4_MCP_TOKEN, or bind to 127.0.0.1."
+        )
+    if not token:
+        log.warning("CONTROL4_MCP_TOKEN not set; SSE server is unauthenticated (localhost only)")
+
+    # Mount the REST layer under /api alongside the MCP SSE endpoint on the
+    # same uvicorn instance. MCP clients hit /sse.
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    from .api import create_api
+
+    app: Any = Starlette(
+        routes=[
+            Mount("/api", app=create_api(_conn)),
+            Mount("/", app=mcp.sse_app()),
+        ]
+    )
+    if token:
+        app = _bearer_auth(app, token)
+    uvicorn.run(app, host=_HOST, port=_PORT)
 
 
 if __name__ == "__main__":
