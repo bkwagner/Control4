@@ -41,3 +41,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# stray build tools
+*.jar
