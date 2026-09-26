@@ -74,6 +74,9 @@ const VIDEO_MATRIX_TARGET_PROXIES = new Set(["avswitch", "av_switch"]);
 // the virtual "Channels" hub. Aggregator tiles (Stations, My Movies, …)
 // rooted in this room ride the matrix; aggregators rooted in real rooms
 // are scoped to that room.
+// How long cached project topology stays valid (see Control4Client.memo).
+const TOPOLOGY_TTL_MS = 5 * 60_000;
+
 const HUB_DEVICE_PROXIES = new Set([
   "control4_digitalaudio",
   "media_server",
@@ -486,6 +489,7 @@ export class Control4Client {
   private wsCallback: ((itemId: number) => void) | null = null;
   private agent: https.Agent | null = null;
   private closed = false;
+  private memoCache = new Map<string, { at: number; value: Promise<unknown> }>();
 
   constructor(
     private readonly settings: Settings,
@@ -494,9 +498,30 @@ export class Control4Client {
     private readonly onCertPinned: (certPem: string) => Promise<void> = async () => {},
   ) {}
 
+  // Project topology (the item list, room AV capabilities, which blinds and
+  // thermostats are real devices) only changes when the project is edited in
+  // Composer, so it's cached instead of re-derived on every UI refresh.
+  // Failed loads aren't cached.
+  private memo<T>(key: string, load: () => Promise<T>, ttlMs = TOPOLOGY_TTL_MS): Promise<T> {
+    const hit = this.memoCache.get(key);
+    if (hit && Date.now() - hit.at < ttlMs) return hit.value as Promise<T>;
+    const value = load();
+    this.memoCache.set(key, { at: Date.now(), value });
+    value.catch(() => {
+      if (this.memoCache.get(key)?.value === value) this.memoCache.delete(key);
+    });
+    return value;
+  }
+
+  private async allItems(): Promise<DirectorItem[]> {
+    const director = await this.ensureDirector();
+    return this.memo("items", () => director.getAllItems());
+  }
+
   // Tear down sockets and the websocket. The client must not be used after.
   close(): void {
     this.closed = true;
+    this.memoCache.clear();
     this.stopEventListener();
     this.director?.close();
     this.director = null;
@@ -616,9 +641,13 @@ export class Control4Client {
     this.wsCallback = null;
   }
 
-  async listRooms(): Promise<RoomDTO[]> {
+  listRooms(): Promise<RoomDTO[]> {
+    return this.memo("rooms", () => this.loadRooms());
+  }
+
+  private async loadRooms(): Promise<RoomDTO[]> {
     const director = await this.ensureDirector();
-    const items = await director.getAllItems();
+    const items = await this.allItems();
     const proxyById = new Map<number, string>();
     for (const it of items) {
       const proxy = it.proxy == null ? "" : String(it.proxy);
@@ -691,40 +720,34 @@ export class Control4Client {
     await director.sendCommand(roomId, "ROOM_OFF");
   }
 
+  // One batched variables read for every light instead of one request per
+  // light; the light list itself is cached topology.
   async listLights(): Promise<LightDTO[]> {
     const director = await this.ensureDirector();
-    const raw = await director.getItemsByCategory("lights");
-    const items = keepLeaves(raw);
-    const out: LightDTO[] = [];
-    for (const it of items) {
-      let level: number | null = null;
-      let state: number | null = null;
-      let dimmable = false;
-      try {
-        const vars = await director.getItemVariables(it.id);
-        for (const v of vars) {
-          if (v.varName === "LIGHT_LEVEL") {
-            level = toInt(v.value);
-            dimmable = true;
-          } else if (v.varName === "LIGHT_STATE") {
-            state = toInt(v.value);
-          }
-        }
-      } catch {
-        // Non-fatal: some items reject variable reads. Leave level/state null.
-      }
-      out.push({
+    const items = await this.memo("lightItems", async () =>
+      keepLeaves(await director.getItemsByCategory("lights")),
+    );
+    const rows = await director.sendGet<Array<DirectorVariable & { id: number }>>(
+      "/api/v1/items/variables?varnames=LIGHT_LEVEL,LIGHT_STATE",
+    );
+    const values = new Map<number, Map<string, unknown>>();
+    for (const row of rows ?? []) {
+      if (!values.has(row.id)) values.set(row.id, new Map());
+      values.get(row.id)!.set(row.varName, row.value);
+    }
+    return items.map((it) => {
+      const vars = values.get(it.id);
+      return {
         id: it.id,
         name: String(it.name ?? ""),
         roomId: (it.roomId as number | null) ?? null,
         roomName: (it.roomName as string | null) ?? null,
         floorName: (it.floorName as string | null) ?? null,
-        level,
-        state,
-        dimmable,
-      });
-    }
-    return out;
+        level: toInt(vars?.get("LIGHT_LEVEL")),
+        state: toInt(vars?.get("LIGHT_STATE")),
+        dimmable: vars?.has("LIGHT_LEVEL") ?? false,
+      };
+    });
   }
 
   async setLightLevel(itemId: number, level: number): Promise<void> {
@@ -740,7 +763,7 @@ export class Control4Client {
 
   async listMediaSources(): Promise<MediaSourceDTO[]> {
     const director = await this.ensureDirector();
-    const allItems = await director.getAllItems();
+    const allItems = await this.allItems();
     const proxyById = new Map<number, string>();
     let hubRoomId: number | null = null;
     for (const it of allItems) {
@@ -999,7 +1022,11 @@ export class Control4Client {
     ]);
   }
 
-  async listClimate(): Promise<ClimateDeviceDTO[]> {
+  listClimate(): Promise<ClimateDeviceDTO[]> {
+    return this.memo("climate", () => this.loadClimate());
+  }
+
+  private async loadClimate(): Promise<ClimateDeviceDTO[]> {
     const director = await this.ensureDirector();
     const raw = await director.getItemsByCategory("comfort");
     const items = keepLeaves(raw);
@@ -1018,9 +1045,13 @@ export class Control4Client {
       .map(slimClimate);
   }
 
-  async listBlinds(): Promise<BlindDTO[]> {
+  listBlinds(): Promise<BlindDTO[]> {
+    return this.memo("blinds", () => this.loadBlinds());
+  }
+
+  private async loadBlinds(): Promise<BlindDTO[]> {
     const director = await this.ensureDirector();
-    const raw = await director.getAllItems();
+    const raw = await this.allItems();
     const items = keepLeaves(raw).filter(
       (it) => String(it.proxy ?? "") === "blind",
     );
@@ -1039,8 +1070,7 @@ export class Control4Client {
   }
 
   async listLocks(): Promise<LockDTO[]> {
-    const director = await this.ensureDirector();
-    const raw = await director.getAllItems();
+    const raw = await this.allItems();
     // Look for lock-like proxies
     const lockProxies = [
       "Lock_Zigbee_Baldwin_SmartLock",
@@ -1055,8 +1085,7 @@ export class Control4Client {
   }
 
   async listSecurity(): Promise<SecurityDeviceDTO[]> {
-    const director = await this.ensureDirector();
-    const raw = await director.getAllItems();
+    const raw = await this.allItems();
     const items = keepLeaves(raw).filter(
       (it) =>
         String(it.proxy ?? "") === "security" &&

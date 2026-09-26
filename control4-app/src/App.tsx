@@ -13,7 +13,11 @@ import { AvOverviewPage } from "@/components/AvOverviewPage";
 import { SetupScreen } from "@/components/SetupScreen";
 import { UpdateIndicator } from "@/components/UpdateIndicator";
 
-const REFRESH_MS = 5000;
+// Director events drive refreshes (see EVENT_REFRESH_DEBOUNCE_MS); this slow
+// poll is only a safety net for missed events.
+const REFRESH_MS = 30_000;
+// Scenes and keypad presses emit bursts of events; refresh once per burst.
+const EVENT_REFRESH_DEBOUNCE_MS = 400;
 // Director takes a moment to reflect a SET_LEVEL in GET queries. During that
 // window, /items still reports the old level, so the next poll would overwrite
 // our optimistic update and the bulb appears to "bounce" off then back on.
@@ -119,9 +123,21 @@ export default function App() {
 
     void tick(true);
     timer = window.setInterval(() => void tick(false), REFRESH_MS);
+
+    let eventTimer: number | undefined;
+    const unsubscribe = window.control4.onItemChanged(() => {
+      if (eventTimer !== undefined) return;
+      eventTimer = window.setTimeout(() => {
+        eventTimer = undefined;
+        void tick(false);
+      }, EVENT_REFRESH_DEBOUNCE_MS);
+    });
+
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearInterval(timer);
+      if (eventTimer !== undefined) window.clearTimeout(eventTimer);
+      unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
