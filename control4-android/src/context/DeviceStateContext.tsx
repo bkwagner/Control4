@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import ReactNativeBlobUtil from 'react-native-blob-util';
 import { useAuth } from './AuthContext';
 import { apiClient } from '../api';
 import { ItemVariable } from '../types';
@@ -41,12 +42,20 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     try {
       setLoading(true);
       setError(null);
-      const allStates = new Map<number, ItemVariable[]>();
-      for (const id of itemIds) {
-        const vars = await apiClient.getItemVariables(id);
-        allStates.set(id, vars);
-      }
-      setStates(allStates);
+      const results = await Promise.all(
+        itemIds.map(async (id) => {
+          try {
+            return [id, await apiClient.getItemVariables(id)] as const;
+          } catch {
+            return [id, [] as ItemVariable[]] as const;
+          }
+        }),
+      );
+      setStates((prev) => {
+        const next = new Map(prev);
+        for (const [id, vars] of results) next.set(id, vars);
+        return next;
+      });
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Failed to fetch item states';
       setError(errorMsg);
@@ -63,9 +72,8 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     try {
       console.log('Connecting to WebSocket:', `wss://${config.directorIp}/api/v1/items/datatoui`);
       const newSocket = io(`wss://${config.directorIp}/api/v1/items/datatoui`, {
-        transports: ['websocket'],
-        auth: { token: config.password },
-        query: { JWT: config.password },
+        auth: { token: config.directorToken },
+        query: { JWT: config.directorToken },
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
@@ -82,22 +90,24 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
 
         try {
           const params = new URLSearchParams({
-            JWT: config.password,
+            JWT: config.directorToken,
             SubscriptionClient: clientId,
           });
           const url = `https://${config.directorIp}/api/v1/items/datatoui?${params}`;
 
           console.log('Fetching subscription ID from:', url);
-          const response = await fetch(url, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' },
-          });
+          const resp = await ReactNativeBlobUtil.config({ trusty: true }).fetch(
+            'GET',
+            url,
+            { 'Accept': 'application/json' },
+          );
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          const status = resp.info().status;
+          if (status < 200 || status >= 300) {
+            throw new Error(`HTTP ${status}: ${resp.text()}`);
           }
 
-          const data = (await response.json()) as { subscriptionId?: string };
+          const data = resp.json() as { subscriptionId?: string };
           console.log('Subscription response:', data);
           if (data.subscriptionId) {
             subscriptionId = data.subscriptionId;

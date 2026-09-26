@@ -8,7 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LoginScreen } from './screens/LoginScreen';
-import { RoomsScreen } from './screens/RoomsScreen';
+import { RoomsStack } from './screens/RoomsStack';
 import { LightsScreen } from './screens/LightsScreen';
 import { BlindsScreen } from './screens/BlindsScreen';
 import { LocksScreen } from './screens/LocksScreen';
@@ -58,8 +58,8 @@ function DeviceTabs() {
     >
       <Tab.Screen
         name="Rooms"
-        component={RoomsScreen}
-        options={{ title: 'Rooms' }}
+        component={RoomsStack}
+        options={{ title: 'Rooms', headerShown: false }}
       />
       <Tab.Screen
         name="Lights"

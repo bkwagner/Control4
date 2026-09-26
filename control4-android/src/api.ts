@@ -1,3 +1,4 @@
+import ReactNativeBlobUtil from 'react-native-blob-util';
 import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, SecurityDevice, ClimateDevice } from './types';
 
 let directorIp: string | null = null;
@@ -5,7 +6,7 @@ let directorToken: string | null = null;
 
 class Control4API {
   private baseURL = '';
-  private headers = {};
+  private headers: Record<string, string> = {};
 
   async setConfig(ip: string, token: string) {
     this.baseURL = `https://${ip}`;
@@ -18,27 +19,25 @@ class Control4API {
   private async request<T>(method: string, path: string, body?: any): Promise<T> {
     const url = `${this.baseURL}${path}`;
     console.log('[API] Request:', method, url);
-    console.log('[API] Config - IP:', directorIp, 'Token exists:', !!directorToken);
 
     try {
-      const response = await fetch(url, {
+      const resp = await ReactNativeBlobUtil.config({ trusty: true }).fetch(
         method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...this.headers,
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+        url,
+        { 'Content-Type': 'application/json', ...this.headers },
+        body ? JSON.stringify(body) : undefined,
+      );
 
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText);
-        const errorMsg = `HTTP ${response.status}: ${errorText}`;
+      const status = resp.info().status;
+      if (status < 200 || status >= 300) {
+        const errorText = resp.text();
+        const errorMsg = `HTTP ${status}: ${errorText}`;
         console.error('[API] HTTP Error:', errorMsg, 'URL:', url);
         throw new Error(errorMsg);
       }
 
-      const data = await response.json();
-      console.log('[API] Response:', response.status, 'Data keys:', Object.keys(data || {}).slice(0, 5));
+      const data = resp.json();
+      console.log('[API] Response:', status, 'Data keys:', Object.keys(data || {}).slice(0, 5));
       return data as T;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -47,7 +46,6 @@ class Control4API {
         url,
         method,
         errorType: error?.constructor?.name,
-        error: JSON.stringify(error),
       });
       throw error;
     }
@@ -69,7 +67,7 @@ export async function setDirectorConfig(ip: string, token: string) {
 }
 
 export async function listRooms(): Promise<Room[]> {
-  const { data } = await api.get('/api/v1/items');
+  const data = await api.get<any[]>('/api/v1/items');
   return data
     .filter((item: any) => item.typeName === 'room')
     .map((item: any) => ({
@@ -81,31 +79,32 @@ export async function listRooms(): Promise<Room[]> {
 }
 
 export async function listLights(): Promise<Light[]> {
-  const { data } = await api.get('/api/v1/categories/lights');
-  const lights: Light[] = [];
-  for (const item of data) {
-    try {
-      const vars = await getItemVariables(item.id);
-      const levelVar = vars.find((v) => v.varName === 'LIGHT_LEVEL');
-      const stateVar = vars.find((v) => v.varName === 'LIGHT_STATE');
-      lights.push({
-        id: item.id,
-        name: item.name,
-        roomId: item.roomId || null,
-        roomName: item.roomName || null,
-        level: levelVar && typeof levelVar.value === 'number' ? levelVar.value : null,
-        state: stateVar && typeof stateVar.value === 'number' ? stateVar.value : null,
-        dimmable: !!levelVar,
-      });
-    } catch (e) {
-      // Skip on error
-    }
-  }
-  return lights;
+  const data = await api.get<any[]>('/api/v1/categories/lights');
+  const results = await Promise.all(
+    data.map(async (item: any) => {
+      try {
+        const vars = await getItemVariables(item.id);
+        const levelVar = vars.find((v) => v.varName === 'LIGHT_LEVEL');
+        const stateVar = vars.find((v) => v.varName === 'LIGHT_STATE');
+        return {
+          id: item.id,
+          name: item.name,
+          roomId: item.roomId || null,
+          roomName: item.roomName || null,
+          level: levelVar && typeof levelVar.value === 'number' ? levelVar.value : null,
+          state: stateVar && typeof stateVar.value === 'number' ? stateVar.value : null,
+          dimmable: !!levelVar,
+        } as Light;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.filter((l): l is Light => l !== null);
 }
 
 export async function listBlinds(): Promise<BlindDevice[]> {
-  const { data } = await api.get('/api/v1/items');
+  const data = await api.get<any[]>('/api/v1/items');
   return data
     .filter((item: any) => String(item.proxy || '').toLowerCase() === 'blind')
     .map((item: any) => ({
@@ -117,7 +116,7 @@ export async function listBlinds(): Promise<BlindDevice[]> {
 }
 
 export async function listLocks(): Promise<LockDevice[]> {
-  const { data } = await api.get('/api/v1/items');
+  const data = await api.get<any[]>('/api/v1/items');
   const lockProxies = ['lock_zigbee_baldwin_smartlock', 'relaysingle_doorlock_c4'];
   return data
     .filter((item: any) => lockProxies.includes(String(item.proxy || '').toLowerCase()))
@@ -130,7 +129,7 @@ export async function listLocks(): Promise<LockDevice[]> {
 }
 
 export async function listSecurity(): Promise<SecurityDevice[]> {
-  const { data } = await api.get('/api/v1/items');
+  const data = await api.get<any[]>('/api/v1/items');
   return data
     .filter(
       (item: any) =>
@@ -146,7 +145,7 @@ export async function listSecurity(): Promise<SecurityDevice[]> {
 }
 
 export async function listClimate(): Promise<ClimateDevice[]> {
-  const { data } = await api.get('/api/v1/categories/comfort');
+  const data = await api.get<any[]>('/api/v1/categories/comfort');
   return data.map((item: any) => ({
     id: item.id,
     name: item.name,
@@ -156,8 +155,7 @@ export async function listClimate(): Promise<ClimateDevice[]> {
 }
 
 export async function getItemVariables(itemId: number): Promise<ItemVariable[]> {
-  const { data } = await api.get(`/api/v1/items/${itemId}/variables`);
-  return data;
+  return api.get<ItemVariable[]>(`/api/v1/items/${itemId}/variables`);
 }
 
 export async function setLightLevel(itemId: number, level: number): Promise<void> {
@@ -243,6 +241,72 @@ export async function setClimate(
   });
 }
 
+// Fast variant: categorize a single room's devices in one round trip of list
+// calls, with no per-device variable fetches. Variables should be refreshed
+// separately for just the room's devices.
+export async function listRoomDevices(roomId: number): Promise<{
+  lights: Light[];
+  blinds: BlindDevice[];
+  locks: LockDevice[];
+  security: SecurityDevice[];
+  climate: ClimateDevice[];
+}> {
+  const [items, lightsCat, comfortCat] = await Promise.all([
+    api.get<any[]>('/api/v1/items'),
+    api.get<any[]>('/api/v1/categories/lights'),
+    api.get<any[]>('/api/v1/categories/comfort'),
+  ]);
+
+  const lockProxies = ['lock_zigbee_baldwin_smartlock', 'relaysingle_doorlock_c4'];
+  const byRoom = <T extends { roomId: number | null }>(arr: T[]) =>
+    arr.filter((d) => d.roomId === roomId);
+
+  const shape = <T extends { id: number; name: string; roomId: number | null; roomName: string | null }>(
+    item: any,
+  ): T =>
+    ({
+      id: item.id,
+      name: item.name,
+      roomId: item.roomId || null,
+      roomName: item.roomName || null,
+    } as T);
+
+  const lights: Light[] = byRoom(
+    lightsCat.map((item: any) => ({
+      ...shape<Light>(item),
+      level: null,
+      state: null,
+      dimmable: false,
+    })),
+  );
+
+  const climate: ClimateDevice[] = byRoom(comfortCat.map((item: any) => shape<ClimateDevice>(item)));
+
+  const blinds: BlindDevice[] = byRoom(
+    items
+      .filter((item: any) => String(item.proxy || '').toLowerCase() === 'blind')
+      .map((item: any) => shape<BlindDevice>(item)),
+  );
+
+  const locks: LockDevice[] = byRoom(
+    items
+      .filter((item: any) => lockProxies.includes(String(item.proxy || '').toLowerCase()))
+      .map((item: any) => shape<LockDevice>(item)),
+  );
+
+  const security: SecurityDevice[] = byRoom(
+    items
+      .filter(
+        (item: any) =>
+          String(item.proxy || '').toLowerCase() === 'security' &&
+          !String(item.name || '').toLowerCase().includes('partition'),
+      )
+      .map((item: any) => shape<SecurityDevice>(item)),
+  );
+
+  return { lights, blinds, locks, security, climate };
+}
+
 // Export api object for use in contexts
 export const apiClient = {
   setDirectorConfig,
@@ -252,6 +316,7 @@ export const apiClient = {
   listLocks,
   listSecurity,
   listClimate,
+  listRoomDevices,
   getItemVariables,
   setLightLevel,
   setBlindLevel,

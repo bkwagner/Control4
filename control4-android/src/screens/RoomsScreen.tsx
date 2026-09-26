@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { View, FlatList, Text, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, FlatList, Text, StyleSheet, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { apiClient } from '../api';
 import { Room } from '../types';
+import type { RoomsStackParamList } from './RoomsStack';
 
 export function RoomsScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RoomsStackParamList>>();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -58,10 +62,15 @@ export function RoomsScreen() {
       data={rooms}
       keyExtractor={(item) => String(item.id)}
       renderItem={({ item }) => (
-        <View style={styles.roomItem}>
+        <TouchableOpacity
+          style={styles.roomItem}
+          onPress={() =>
+            navigation.navigate('RoomDetail', { roomId: item.id, roomName: item.name })
+          }
+        >
           <Text style={styles.roomName}>{item.name}</Text>
           {item.floorName && <Text style={styles.floorName}>{item.floorName}</Text>}
-        </View>
+        </TouchableOpacity>
       )}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       contentContainerStyle={rooms.length === 0 ? styles.emptyContainer : undefined}

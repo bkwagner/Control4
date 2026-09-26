@@ -53,4 +53,6 @@ export interface AppConfig {
   password: string;
   directorIp: string;
   controllerCommonName: string | null;
+  directorToken: string;
+  tokenExpiresAt: number;
 }
