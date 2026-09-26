@@ -480,6 +480,77 @@ function parseNowPlaying(raw: unknown): NowPlayingDTO | null {
   };
 }
 
+// Room variables that make up RoomAvStateDTO.
+const ROOM_AV_VARS = [
+  "POWER_STATE",
+  "CURRENT_VOLUME",
+  "IS_MUTED",
+  "CURRENT_VIDEO_DEVICE",
+  "CURRENT_AUDIO_DEVICE",
+  "PLAYING_AUDIO_DEVICE",
+  "CURRENT MEDIA INFO",
+  "CURRENT_MEDIA_INFO",
+];
+
+// Build a room's AV state from its variables (keyed by varName). Shared by
+// the single-room read and the batched all-rooms read.
+function roomAvStateFromVars(
+  roomId: number,
+  byName: Map<string, unknown>,
+): RoomAvStateDTO {
+  const read = (...names: string[]): unknown => {
+    for (const n of names) {
+      if (!byName.has(n)) continue;
+      const val = byName.get(n);
+      if (val === "Undefined" || val === undefined || val === null) continue;
+      return val;
+    }
+    return null;
+  };
+
+  const powerState = read("POWER_STATE");
+  const volumeVal = read("CURRENT_VOLUME");
+  const mutedVal = read("IS_MUTED");
+  const videoSourceVal = read("CURRENT_VIDEO_DEVICE");
+  const audioSourceVal = read("CURRENT_AUDIO_DEVICE");
+  // With matrix audio, CURRENT_AUDIO_DEVICE is the hub (e.g. DMS 100002)
+  // rather than the actual source (Pandora/Spotify/SiriusXM item). The room
+  // also exposes PLAYING_AUDIO_DEVICE as the real source — prefer it so
+  // "Listening to X" resolves to a user-facing source tile.
+  const playingAudioVal = read("PLAYING_AUDIO_DEVICE");
+  const mediaInfoRaw = read("CURRENT MEDIA INFO", "CURRENT_MEDIA_INFO");
+
+  const audioSourceId = toInt(audioSourceVal);
+  const videoSourceId = toInt(videoSourceVal);
+  const playingAudioId = toInt(playingAudioVal);
+  const videoActive = videoSourceId != null && videoSourceId !== 0;
+  const audioActive = audioSourceId != null && audioSourceId !== 0;
+  const isOn = Number(powerState ?? 0) !== 0 || videoActive || audioActive;
+  const mode: RoomAvMode = videoActive
+    ? "video"
+    : audioActive
+      ? "audio"
+      : "off";
+
+  const effectiveAudioId =
+    playingAudioId && playingAudioId !== 0 ? playingAudioId : audioSourceId;
+
+  return {
+    room_id: roomId,
+    is_on: isOn,
+    volume: volumeVal == null ? -1 : toInt(volumeVal) ?? -1,
+    muted: Number(mutedVal ?? 0) !== 0,
+    mode,
+    audio_source_id:
+      effectiveAudioId && effectiveAudioId !== 0 ? effectiveAudioId : null,
+    video_source_id:
+      videoSourceId && videoSourceId !== 0 ? videoSourceId : null,
+    now_playing: parseNowPlaying(mediaInfoRaw),
+    matrix_source_id:
+      audioSourceId && audioSourceId !== 0 ? audioSourceId : null,
+  };
+}
+
 export class Control4Client {
   private director: Director | null = null;
   private tokenExpiresAt = 0;
@@ -822,67 +893,46 @@ export class Control4Client {
   async getRoomAvState(roomId: number): Promise<RoomAvStateDTO> {
     const director = await this.ensureDirector();
     const vars = await director.getItemVariables(roomId);
-
     const byName = new Map<string, unknown>();
     for (const v of vars) byName.set(v.varName, v.value);
-
-    const read = (...names: string[]): unknown => {
-      for (const n of names) {
-        if (!byName.has(n)) continue;
-        const val = byName.get(n);
-        if (val === "Undefined" || val === undefined || val === null) continue;
-        return val;
-      }
-      return null;
-    };
-
-    const powerState = read("POWER_STATE");
-    const volumeVal = read("CURRENT_VOLUME");
-    const mutedVal = read("IS_MUTED");
-    const videoSourceVal = read("CURRENT_VIDEO_DEVICE");
-    const audioSourceVal = read("CURRENT_AUDIO_DEVICE");
-    // With matrix audio, CURRENT_AUDIO_DEVICE is the hub (e.g. DMS 100002)
-    // rather than the actual source (Pandora/Spotify/SiriusXM item). The room
-    // also exposes PLAYING_AUDIO_DEVICE as the real source — prefer it so
-    // "Listening to X" resolves to a user-facing source tile.
-    const playingAudioVal = read("PLAYING_AUDIO_DEVICE");
-    const mediaInfoRaw = read("CURRENT MEDIA INFO", "CURRENT_MEDIA_INFO");
-
-    const audioSourceId = toInt(audioSourceVal);
-    const videoSourceId = toInt(videoSourceVal);
-    const playingAudioId = toInt(playingAudioVal);
-    const videoActive = videoSourceId != null && videoSourceId !== 0;
-    const audioActive = audioSourceId != null && audioSourceId !== 0;
-    const isOn = Number(powerState ?? 0) !== 0 || videoActive || audioActive;
-    const mode: RoomAvMode = videoActive
-      ? "video"
-      : audioActive
-        ? "audio"
-        : "off";
-
-    const effectiveAudioId =
-      playingAudioId && playingAudioId !== 0 ? playingAudioId : audioSourceId;
-
-    return {
-      room_id: roomId,
-      is_on: isOn,
-      volume: volumeVal == null ? -1 : toInt(volumeVal) ?? -1,
-      muted: Number(mutedVal ?? 0) !== 0,
-      mode,
-      audio_source_id:
-        effectiveAudioId && effectiveAudioId !== 0 ? effectiveAudioId : null,
-      video_source_id:
-        videoSourceId && videoSourceId !== 0 ? videoSourceId : null,
-      now_playing: parseNowPlaying(mediaInfoRaw),
-      matrix_source_id:
-        audioSourceId && audioSourceId !== 0 ? audioSourceId : null,
-    };
+    return roomAvStateFromVars(roomId, byName);
   }
 
+  // One batched variables read for every requested room instead of one
+  // request per room.
   async getMultiRoomAvState(
     roomIds: number[],
   ): Promise<RoomAvStateDTO[]> {
-    return Promise.all(roomIds.map((id) => this.getRoomAvState(id)));
+    const director = await this.ensureDirector();
+    const rows = await director.sendGet<Array<DirectorVariable & { id: number }>>(
+      `/api/v1/items/variables?varnames=${ROOM_AV_VARS.map(encodeURIComponent).join(",")}`,
+    );
+    const wanted = new Set(roomIds);
+    const byRoom = new Map<number, Map<string, unknown>>();
+    for (const row of rows ?? []) {
+      if (!wanted.has(row.id)) continue;
+      if (!byRoom.has(row.id)) byRoom.set(row.id, new Map());
+      byRoom.get(row.id)!.set(row.varName, row.value);
+    }
+    return roomIds.map((id) => roomAvStateFromVars(id, byRoom.get(id) ?? new Map()));
+  }
+
+  // True for events that can change what the AV views show: rooms and
+  // anything in the audio_video category (TVs, receivers, media services).
+  async isAvItem(itemId: number): Promise<boolean> {
+    const ids = await this.memo("avItemIds", async () => {
+      const items = await this.allItems();
+      return new Set(
+        items
+          .filter(
+            (it) =>
+              it.typeName === "room" ||
+              (it.categories ?? []).includes("audio_video"),
+          )
+          .map((it) => it.id),
+      );
+    });
+    return ids.has(itemId);
   }
 
   async roomCommand(

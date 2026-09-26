@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { scheduleAvRefresh } from "@/lib/avRefresh";
 import type { Room, RoomAvState } from "@/lib/types";
 
 interface Props {
@@ -7,13 +8,11 @@ interface Props {
   onRoomClick?: (roomId: number) => void;
 }
 
-const POLL_MS = 3000;
 
 export function AvOverviewPage({ rooms, onRoomClick }: Props) {
   const [states, setStates] = useState<Map<number, RoomAvState>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const timerRef = useRef<number | undefined>(undefined);
 
   // Filter to rooms that can route audio (matrix hardware or IP-volume TVs).
   // Family Room can join matrix audio despite hasMatrixAudio: false because
@@ -44,10 +43,10 @@ export function AvOverviewPage({ rooms, onRoomClick }: Props) {
     }
 
     void refresh();
-    timerRef.current = window.setInterval(() => void refresh(), POLL_MS);
+    const stopSchedule = scheduleAvRefresh(() => void refresh());
     return () => {
       cancelled = true;
-      if (timerRef.current !== undefined) window.clearInterval(timerRef.current);
+      stopSchedule();
     };
   }, [avRoomIds]);
 

@@ -97,6 +97,7 @@ export interface Control4Api {
   };
 
   onItemChanged: (cb: (itemId: number) => void) => () => void;
+  onAvChanged: (cb: (itemId: number) => void) => () => void;
 }
 
 export type UpdaterState =

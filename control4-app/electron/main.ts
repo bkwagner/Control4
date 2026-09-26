@@ -42,8 +42,16 @@ function requireClient(): Control4Client {
 
 function startEventListener(): void {
   if (!client || !mainWindow) return;
-  client.startEventListener((itemId) => {
+  const c = client;
+  c.startEventListener((itemId) => {
     mainWindow?.webContents.send("events:itemChanged", itemId);
+    // AV views only care about rooms and AV devices; tag those separately so
+    // they don't refetch on every motion sensor or keypad clock tick.
+    c.isAvItem(itemId)
+      .then((isAv) => {
+        if (isAv) mainWindow?.webContents.send("events:avChanged", itemId);
+      })
+      .catch(() => {});
   });
 }
 

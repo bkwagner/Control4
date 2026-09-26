@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { scheduleAvRefresh } from "@/lib/avRefresh";
 import type { MediaBrowseGroup, MediaSource, RoomAvState } from "@/lib/types";
 
 interface Props {
@@ -9,7 +10,9 @@ interface Props {
   sources: MediaSource[];
 }
 
-const POLL_MS = 3000;
+// After our own command, re-read immediately and once more after the
+// director has had time to apply it (it reflects changes with a short lag).
+const POST_ACTION_REFRESH_MS = [300, 1500];
 const VOLUME_COMMIT_MS = 150;
 const VOLUME_STEP = 3;
 
@@ -46,10 +49,10 @@ export function AudioPanel({
   const [browse, setBrowse] = useState<BrowseSession | null>(null);
   const volTimer = useRef<number | null>(null);
   const volPending = useRef<number | null>(null);
+  const refreshRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
-    let timer: number | undefined;
 
     async function refresh(): Promise<void> {
       try {
@@ -64,11 +67,12 @@ export function AudioPanel({
       }
     }
 
+    refreshRef.current = () => void refresh();
     void refresh();
-    timer = window.setInterval(() => void refresh(), POLL_MS);
+    const stopSchedule = scheduleAvRefresh(() => void refresh());
     return () => {
       cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
+      stopSchedule();
     };
   }, [roomId]);
 
@@ -106,6 +110,9 @@ export function AudioPanel({
     setError(null);
     try {
       await fn();
+      for (const ms of POST_ACTION_REFRESH_MS) {
+        window.setTimeout(() => refreshRef.current(), ms);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

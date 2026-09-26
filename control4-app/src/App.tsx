@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { scheduleAvRefresh } from "@/lib/avRefresh";
 import type { AppSettings } from "@/lib/control4";
 import type { BlindDevice, ClimateDevice, Light, LockDevice, MediaSource, Room, SecurityDevice } from "@/lib/types";
 import { RoomList } from "@/components/RoomList";
@@ -163,10 +164,10 @@ export default function App() {
     }
 
     void checkActivity();
-    const timer = window.setInterval(() => void checkActivity(), 5000);
+    const stopSchedule = scheduleAvRefresh(() => void checkActivity());
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopSchedule();
     };
   }, [ready, rooms]);
 

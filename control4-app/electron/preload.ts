@@ -122,6 +122,12 @@ const api = {
     ipcRenderer.on("events:itemChanged", listener);
     return () => ipcRenderer.removeListener("events:itemChanged", listener);
   },
+  // Subset of item events from rooms and audio/video devices.
+  onAvChanged: (cb: (itemId: number) => void) => {
+    const listener = (_e: unknown, id: number) => cb(id);
+    ipcRenderer.on("events:avChanged", listener);
+    return () => ipcRenderer.removeListener("events:avChanged", listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("control4", api);
