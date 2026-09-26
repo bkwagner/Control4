@@ -23,6 +23,20 @@ const CLIENT_INFO_DEVICE = {
   osVersion: '14',
 };
 
+// The cloud explicitly refused the credentials (as opposed to a network or
+// server failure). Only this should cause stored credentials to be dropped.
+export class AuthRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthRejectedError';
+  }
+}
+
+function httpError(url: string, status: number, text: string): Error {
+  const msg = `${url} -> ${status}: ${text.slice(0, 400)}`;
+  return status === 401 || status === 403 ? new AuthRejectedError(msg) : new Error(msg);
+}
+
 export interface AccountControllerInfo {
   controllerCommonName: string;
   href: string;
@@ -47,7 +61,7 @@ async function postJson(
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`${url} -> ${res.status}: ${text.slice(0, 400)}`);
+    throw httpError(url, res.status, text);
   }
   try {
     return JSON.parse(text);
@@ -60,7 +74,7 @@ async function getJson(url: string, headers: Record<string, string>): Promise<un
   const res = await fetch(url, { method: 'GET', headers });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`${url} -> ${res.status}: ${text.slice(0, 400)}`);
+    throw httpError(url, res.status, text);
   }
   return JSON.parse(text);
 }
@@ -84,7 +98,7 @@ export async function getAccountBearerToken(
   };
   const token = data.authToken?.token;
   if (!token) {
-    throw new Error('Control4 cloud auth did not return a token — check username/password.');
+    throw new AuthRejectedError('Control4 cloud auth did not return a token — check username/password.');
   }
   return token;
 }

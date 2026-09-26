@@ -4,51 +4,51 @@ import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, Security
 let directorIp: string | null = null;
 let directorToken: string | null = null;
 
+type HttpMethod = 'GET' | 'POST';
+
 class Control4API {
   private baseURL = '';
   private headers: Record<string, string> = {};
+  // Supplied by AuthContext: returns a fresh director token (or null if one
+  // can't be obtained). Used to recover from an expired token mid-session.
+  private refreshToken: (() => Promise<string | null>) | null = null;
 
   async setConfig(ip: string, token: string) {
     this.baseURL = `https://${ip}`;
     this.headers = { 'Authorization': `Bearer ${token}` };
     directorIp = ip;
     directorToken = token;
-    console.log('[API] Config set for:', ip);
   }
 
-  private async request<T>(method: string, path: string, body?: any): Promise<T> {
+  setTokenRefresher(fn: (() => Promise<string | null>) | null) {
+    this.refreshToken = fn;
+  }
+
+  private async request<T>(method: HttpMethod, path: string, body?: any, retried = false): Promise<T> {
     const url = `${this.baseURL}${path}`;
-    console.log('[API] Request:', method, url);
+    // TODO(cert pinning): `trusty` skips TLS verification for the director's
+    // self-signed cert. Replace with a pinned-cert native module.
+    const resp = await ReactNativeBlobUtil.config({ trusty: true }).fetch(
+      method,
+      url,
+      { 'Content-Type': 'application/json', ...this.headers },
+      body ? JSON.stringify(body) : undefined,
+    );
 
-    try {
-      const resp = await ReactNativeBlobUtil.config({ trusty: true }).fetch(
-        method,
-        url,
-        { 'Content-Type': 'application/json', ...this.headers },
-        body ? JSON.stringify(body) : undefined,
-      );
-
-      const status = resp.info().status;
-      if (status < 200 || status >= 300) {
-        const errorText = resp.text();
-        const errorMsg = `HTTP ${status}: ${errorText}`;
-        console.error('[API] HTTP Error:', errorMsg, 'URL:', url);
-        throw new Error(errorMsg);
+    const status = resp.info().status;
+    if (status === 401 && !retried && this.refreshToken) {
+      const token = await this.refreshToken();
+      if (token) {
+        this.headers = { 'Authorization': `Bearer ${token}` };
+        directorToken = token;
+        return this.request<T>(method, path, body, true);
       }
-
-      const data = resp.json();
-      console.log('[API] Response:', status, 'Data keys:', Object.keys(data || {}).slice(0, 5));
-      return data as T;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error('[API] Error Details:', {
-        message: msg,
-        url,
-        method,
-        errorType: error?.constructor?.name,
-      });
-      throw error;
     }
+    if (status < 200 || status >= 300) {
+      const text = String(await resp.text());
+      throw new Error(`${method} ${path} -> HTTP ${status}: ${text.slice(0, 200)}`);
+    }
+    return resp.json() as T;
   }
 
   async get<T>(path: string): Promise<T> {
@@ -64,6 +64,10 @@ const api = new Control4API();
 
 export async function setDirectorConfig(ip: string, token: string) {
   await api.setConfig(ip, token);
+}
+
+export function setTokenRefresher(fn: (() => Promise<string | null>) | null) {
+  api.setTokenRefresher(fn);
 }
 
 export async function listRooms(): Promise<Room[]> {
@@ -310,6 +314,7 @@ export async function listRoomDevices(roomId: number): Promise<{
 // Export api object for use in contexts
 export const apiClient = {
   setDirectorConfig,
+  setTokenRefresher,
   listRooms,
   listLights,
   listBlinds,
