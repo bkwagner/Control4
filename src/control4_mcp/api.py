@@ -18,6 +18,7 @@ from pyControl4.room import C4Room
 from pydantic import BaseModel
 
 from .client import Control4Connection
+from .state import LightStore
 
 
 class LightLevelPayload(BaseModel):
@@ -38,7 +39,7 @@ class SourcePayload(BaseModel):
     source_id: int
 
 
-def create_api(conn: Control4Connection) -> FastAPI:
+def create_api(conn: Control4Connection, lights: LightStore) -> FastAPI:
     app = FastAPI(title="Control4 App API", version="0.1.0")
 
     # No CORS middleware on purpose: browsers on other origins must not be
@@ -114,39 +115,9 @@ def create_api(conn: Control4Connection) -> FastAPI:
 
     @app.get("/lights")
     async def list_lights() -> list[dict[str, Any]]:
-        """All lights with their current LIGHT_LEVEL and LIGHT_STATE in one call."""
-        director = await conn.director()
-        lights = await director.get_all_items_by_category("lights")
-        out: list[dict[str, Any]] = []
-        for it in lights:
-            item_id = it.get("id")
-            level: int | None = None
-            state: int | None = None
-            dimmable = False
-            try:
-                variables = await director.get_item_variables(item_id)
-                for v in variables:
-                    name = v.get("varName")
-                    if name == "LIGHT_LEVEL":
-                        level = int(v.get("value")) if v.get("value") is not None else None
-                        dimmable = True
-                    elif name == "LIGHT_STATE":
-                        state = int(v.get("value")) if v.get("value") is not None else None
-            except Exception:  # noqa: BLE001
-                pass
-            out.append(
-                {
-                    "id": item_id,
-                    "name": it.get("name"),
-                    "roomId": it.get("roomId"),
-                    "roomName": it.get("roomName"),
-                    "floorName": it.get("floorName"),
-                    "level": level,
-                    "state": state,
-                    "dimmable": dimmable,
-                }
-            )
-        return out
+        """All lights with their current LIGHT_LEVEL and LIGHT_STATE, served
+        from the event-fed store (one batched director read, not one per light)."""
+        return await lights.lights()
 
     @app.post("/lights/{item_id}/level")
     async def set_light_level(item_id: int, payload: LightLevelPayload) -> dict[str, Any]:

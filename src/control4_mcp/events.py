@@ -11,7 +11,7 @@ import itertools
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Iterable
+from typing import Any, Callable, Deque, Iterable
 
 EVENT_BUFFER_DEFAULT = 500
 
@@ -39,14 +39,22 @@ class EventBus:
     _seq: "itertools.count[int]" = field(init=False, default_factory=lambda: itertools.count(1))
     _signal: asyncio.Event = field(init=False, default_factory=asyncio.Event)
 
+    _subscribers: list[Callable[[int], None]] = field(init=False, default_factory=list)
+
     def __post_init__(self) -> None:
         self._buf = deque(maxlen=self.maxlen)
+
+    def subscribe(self, callback: Callable[[int], None]) -> None:
+        """Call `callback(item_id)` synchronously for every published event."""
+        self._subscribers.append(callback)
 
     def publish(self, item_id: int, message: dict[str, Any]) -> None:
         self._buf.append(Event(seq=next(self._seq), ts=time.time(), item_id=item_id, message=message))
         # Wake all current waiters; they decide whether the new event matches.
         self._signal.set()
         self._signal.clear()
+        for callback in self._subscribers:
+            callback(item_id)
 
     def latest_seq(self) -> int:
         return self._buf[-1].seq if self._buf else 0

@@ -61,6 +61,8 @@ uv run control4-mcp          # starts the MCP server over stdio
 - `list_items(category?)` — filter by `lights`, `comfort`, `thermostats`,
   `sensors`, `cameras`, `audio_video`, `motorization`, `motors`, …
 - `find_items(query)` — fuzzy name search
+- `list_lights(room?, only_on?)` — every light's level/state in one call, served
+  from an in-memory store kept current by Director events
 - `get_item_variables(item_id)` — current brightness, temp, power state, …
 
 **Control**

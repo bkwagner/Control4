@@ -20,6 +20,7 @@ from pyControl4.room import C4Room
 
 from .client import Control4Connection
 from .config import Settings
+from .state import LightStore
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ _PORT = int(os.getenv("CONTROL4_MCP_PORT", "8000"))
 mcp = FastMCP("control4", host=_HOST, port=_PORT)
 _settings = Settings.from_env()
 _conn = Control4Connection(_settings)
+_lights = LightStore(_conn)
 
 # Commands that unlock doors or change alarm state. The generic escape hatch
 # refuses these unless explicitly enabled, so an LLM (or anyone who reaches
@@ -105,6 +107,26 @@ async def find_items(query: str) -> list[dict[str, Any]]:
     director = await _conn.director()
     items = await director.get_all_item_info()
     return [_slim(it) for it in items if needle in str(it.get("name", "")).lower()]
+
+
+@mcp.tool()
+async def list_lights(room: str | None = None, only_on: bool = False) -> list[dict[str, Any]]:
+    """List lights with their current state in one call.
+
+    Each light has `level` (0-100, dimmers only), `state` (1 on / 0 off) and
+    `dimmable`. Much cheaper than calling `get_item_variables` per light.
+
+    Args:
+        room: Optional case-insensitive substring of the room name.
+        only_on: If true, return only lights that are currently on.
+    """
+    rows = await _lights.lights()
+    if room:
+        needle = room.strip().lower()
+        rows = [r for r in rows if needle in str(r.get("roomName") or "").lower()]
+    if only_on:
+        rows = [r for r in rows if (r["level"] or 0) > 0 or r["state"] == 1]
+    return rows
 
 
 @mcp.tool()
@@ -484,7 +506,7 @@ def main() -> None:
 
     app: Any = Starlette(
         routes=[
-            Mount("/api", app=create_api(_conn)),
+            Mount("/api", app=create_api(_conn, _lights)),
             Mount("/", app=mcp.sse_app()),
         ]
     )
