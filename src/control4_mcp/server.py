@@ -18,6 +18,7 @@ from pyControl4.climate import C4Climate
 from pyControl4.light import C4Light
 from pyControl4.room import C4Room
 
+from .bridge import BridgeActionError, BridgeUnavailable, C4BridgeClient
 from .client import Control4Connection
 from .config import Settings
 from .state import LightStore
@@ -31,6 +32,30 @@ mcp = FastMCP("control4", host=_HOST, port=_PORT)
 _settings = Settings.from_env()
 _conn = Control4Connection(_settings)
 _lights = LightStore(_conn)
+# Lights, thermostats, fans, blinds and security status go through C4Bridge
+# when configured: it runs on the Director and needs no Control4 cloud
+# login. Anything it can't serve falls back to the direct Director path.
+_bridge = (
+    C4BridgeClient(_settings.c4bridge_url, _settings.c4bridge_token)
+    if _settings.c4bridge_token and _settings.c4bridge_url
+    else None
+)
+
+
+def _require_bridge() -> C4BridgeClient:
+    if _bridge is None:
+        raise RuntimeError(
+            "This tool needs C4Bridge: set CONTROL4_C4BRIDGE_TOKEN (and optionally "
+            "CONTROL4_C4BRIDGE_URL) for the C4Bridge driver installed on the Director."
+        )
+    return _bridge
+
+
+def _in_room(rows: list[dict[str, Any]], room: str | None) -> list[dict[str, Any]]:
+    if not room:
+        return rows
+    needle = room.strip().lower()
+    return [r for r in rows if needle in str(r.get("roomName") or "").lower()]
 
 # Commands that unlock doors or change alarm state. The generic escape hatch
 # refuses these unless explicitly enabled, so an LLM (or anyone who reaches
@@ -120,10 +145,26 @@ async def list_lights(room: str | None = None, only_on: bool = False) -> list[di
         room: Optional case-insensitive substring of the room name.
         only_on: If true, return only lights that are currently on.
     """
-    rows = await _lights.lights()
-    if room:
-        needle = room.strip().lower()
-        rows = [r for r in rows if needle in str(r.get("roomName") or "").lower()]
+    rows: list[dict[str, Any]] | None = None
+    if _bridge is not None:
+        try:
+            rows = [
+                {
+                    "id": d["id"],
+                    "name": d.get("name"),
+                    "roomId": d.get("room_id"),
+                    "roomName": d.get("room_name"),
+                    "level": d["state"].get("brightness") if d["capabilities"].get("brightness") else None,
+                    "state": 1 if d["state"].get("power") else 0,
+                    "dimmable": bool(d["capabilities"].get("brightness")),
+                }
+                for d in await _bridge.devices("lights")
+            ]
+        except BridgeUnavailable as e:
+            log.info("list_lights: %s; using Director", e)
+    if rows is None:
+        rows = await _lights.lights()
+    rows = _in_room(rows, room)
     if only_on:
         rows = [r for r in rows if (r["level"] or 0) > 0 or r["state"] == 1]
     return rows
@@ -154,6 +195,22 @@ async def set_light_level(item_id: int, level: int) -> str:
             non-zero value as on.
     """
     level = max(0, min(100, int(level)))
+    if _bridge is not None:
+        try:
+            if level == 0:
+                await _bridge.action(item_id, "off")
+            else:
+                try:
+                    await _bridge.action(item_id, "set_brightness", value=level)
+                except BridgeActionError as e:
+                    if e.code != "ACTION_NOT_SUPPORTED":
+                        raise
+                    await _bridge.action(item_id, "on")  # non-dimming switch
+            return f"ok: item {item_id} set to {level}"
+        except BridgeUnavailable as e:
+            log.info("set_light_level: %s; using Director", e)
+        except BridgeActionError as e:
+            return f"error: {e}"
     director = await _conn.director()
     await C4Light(director, item_id).set_level(level)
     return f"ok: item {item_id} set to {level}"
@@ -162,6 +219,16 @@ async def set_light_level(item_id: int, level: int) -> str:
 @mcp.tool()
 async def toggle_light(item_id: int) -> str:
     """Toggle a light on/off based on its current level."""
+    if _bridge is not None:
+        try:
+            light = await _bridge.device("lights", item_id)
+            action = "off" if light["state"].get("power") else "on"
+            await _bridge.action(item_id, action)
+            return f"ok: item {item_id} turned {action}"
+        except BridgeUnavailable as e:
+            log.info("toggle_light: %s; using Director", e)
+        except BridgeActionError as e:
+            return f"error: {e}"
     director = await _conn.director()
     light = C4Light(director, item_id)
     # Non-dimming switches have no LIGHT_LEVEL; fall back to LIGHT_STATE.
@@ -196,9 +263,18 @@ async def set_climate(
         item_id: Climate item id.
         heat_setpoint_f: Heat setpoint in Fahrenheit.
         cool_setpoint_f: Cool setpoint in Fahrenheit.
-        hvac_mode: e.g. "Off", "Heat", "Cool", "Auto". Call
-            `get_item_variables` on the climate item to see its supported modes.
+        hvac_mode: e.g. "Off", "Heat", "Cool", "Auto". `list_thermostats`
+            shows each thermostat's supported modes.
     """
+    if heat_setpoint_f is None and cool_setpoint_f is None and hvac_mode is None:
+        return "no-op: pass at least one of heat_setpoint_f, cool_setpoint_f, or hvac_mode"
+    if _bridge is not None:
+        try:
+            return await _bridge_set_climate(item_id, heat_setpoint_f, cool_setpoint_f, hvac_mode)
+        except BridgeUnavailable as e:
+            log.info("set_climate: %s; using Director", e)
+        except BridgeActionError as e:
+            return f"error: {e}"
     director = await _conn.director()
     climate = C4Climate(director, item_id)
     actions: list[str] = []
@@ -214,6 +290,171 @@ async def set_climate(
     if not actions:
         return "no-op: pass at least one of heat_setpoint_f, cool_setpoint_f, or hvac_mode"
     return f"ok: climate {item_id} {' '.join(actions)}"
+
+
+async def _bridge_set_climate(
+    item_id: int,
+    heat_f: float | None,
+    cool_f: float | None,
+    hvac_mode: str | None,
+) -> str:
+    assert _bridge is not None
+    device = await _bridge.device("climate", item_id)
+    done: list[str] = []
+    if device["capabilities"].get("setpoint_mode") == "dual":
+        if heat_f is not None:
+            await _bridge.action(item_id, "set_heat_setpoint", value=heat_f, unit="f")
+            done.append(f"heat={heat_f}°F")
+        if cool_f is not None:
+            await _bridge.action(item_id, "set_cool_setpoint", value=cool_f, unit="f")
+            done.append(f"cool={cool_f}°F")
+    else:
+        # Single-setpoint thermostats take one target, in Celsius.
+        target_f = heat_f if heat_f is not None else cool_f
+        if target_f is not None:
+            target_c = round((float(target_f) - 32) * 5 / 9, 1)
+            await _bridge.action(item_id, "set_temperature", value=target_c)
+            done.append(f"target={target_f}°F")
+    if hvac_mode is not None:
+        await _bridge.action(item_id, "set_hvac_mode", value=hvac_mode.lower())
+        done.append(f"mode={hvac_mode}")
+    return f"ok: climate {item_id} {' '.join(done)}"
+
+
+@mcp.tool()
+async def list_thermostats(room: str | None = None) -> list[dict[str, Any]]:
+    """List thermostats with current temperature, setpoints, mode and what the
+    system is doing right now. Temperatures are in each thermostat's own unit
+    (`unit`). Requires C4Bridge.
+
+    Args:
+        room: Optional case-insensitive substring of the room name.
+    """
+    rows = []
+    for d in await _require_bridge().devices("climate"):
+        st, caps = d["state"], d["capabilities"]
+        dual = caps.get("setpoint_mode") == "dual"
+        rows.append({
+            "id": d["id"],
+            "name": d.get("name"),
+            "roomName": d.get("room_name"),
+            "unit": st.get("scale") if dual else "C",
+            "current": st.get("current_temperature") if dual else st.get("current_temperature_c"),
+            "heat_setpoint": st.get("heat_setpoint") if dual else None,
+            "cool_setpoint": st.get("cool_setpoint") if dual else None,
+            "target": None if dual else st.get("target_temperature_c"),
+            "mode": st.get("hvac_mode"),
+            "running": st.get("hvac_state"),
+            "fan_mode": st.get("fan_mode"),
+            "modes": caps.get("hvac_modes"),
+            "fan_modes": caps.get("fan_modes"),
+        })
+    return _in_room(rows, room)
+
+
+@mcp.tool()
+async def list_fans(room: str | None = None) -> list[dict[str, Any]]:
+    """List ceiling/exhaust fans with power and speed (0 off, 1 low, 2 medium,
+    3 medium_high, 4 high). Requires C4Bridge."""
+    rows = [
+        {
+            "id": d["id"],
+            "name": d.get("name"),
+            "roomName": d.get("room_name"),
+            "on": d["state"].get("power"),
+            "speed": d["state"].get("speed"),
+            "speeds": d["capabilities"].get("speeds"),
+        }
+        for d in await _require_bridge().devices("fans")
+    ]
+    return _in_room(rows, room)
+
+
+@mcp.tool()
+async def set_fan(item_id: int, on: bool | None = None, speed: str | None = None) -> str:
+    """Turn a fan on/off or set its speed. Requires C4Bridge.
+
+    Args:
+        item_id: Fan id from `list_fans`.
+        on: True to turn on (at its preset speed), False to turn off.
+        speed: "low", "medium", "medium_high", "high", "off", or 0-4.
+            Setting a speed also turns the fan on.
+    """
+    bridge = _require_bridge()
+    try:
+        if speed is not None:
+            await bridge.action(item_id, "set_speed", value=speed)
+            return f"ok: fan {item_id} speed={speed}"
+        if on is not None:
+            await bridge.action(item_id, "on" if on else "off")
+            return f"ok: fan {item_id} {'on' if on else 'off'}"
+    except BridgeActionError as e:
+        return f"error: {e}"
+    return "no-op: pass on or speed"
+
+
+@mcp.tool()
+async def list_blinds(room: str | None = None) -> list[dict[str, Any]]:
+    """List shades/blinds with position (0 closed - 100 open; null if the motor
+    hasn't reported a position) and whether they're moving. Requires C4Bridge."""
+    rows = [
+        {
+            "id": d["id"],
+            "name": d.get("name"),
+            "roomName": d.get("room_name"),
+            "position": d["state"].get("level"),
+            "position_known": d["state"].get("position_known", True),
+            "movement": d["state"].get("movement"),
+        }
+        for d in await _require_bridge().devices("covers")
+    ]
+    return _in_room(rows, room)
+
+
+@mcp.tool()
+async def set_blind(item_id: int, action: str | None = None, position: int | None = None) -> str:
+    """Open, close, stop, or position a shade/blind. Requires C4Bridge.
+
+    Args:
+        item_id: Blind id from `list_blinds`.
+        action: "open", "close" or "stop".
+        position: 0 (closed) through 100 (open); used when action is omitted.
+    """
+    bridge = _require_bridge()
+    try:
+        if action is not None:
+            act = action.strip().lower()
+            if act not in ("open", "close", "stop"):
+                return 'error: action must be "open", "close" or "stop"'
+            await bridge.action(item_id, act)
+            return f"ok: blind {item_id} {act}"
+        if position is not None:
+            await bridge.action(item_id, "set_level", value=max(0, min(100, int(position))))
+            return f"ok: blind {item_id} position={position}"
+    except BridgeActionError as e:
+        return f"error: {e}"
+    return "no-op: pass action or position"
+
+
+@mcp.tool()
+async def get_alarm_status() -> list[dict[str, Any]]:
+    """Read-only security system status per active partition: armed/disarmed,
+    alarm, open zones, entry/exit delay, trouble. Arming/disarming is not
+    available. Requires C4Bridge."""
+    return [
+        {
+            "id": d["id"],
+            "name": d.get("name"),
+            "state": d["state"].get("partition_state"),
+            "armed": d["state"].get("armed"),
+            "armed_mode": d["state"].get("armed_mode"),
+            "alarm": d["state"].get("alarm"),
+            "open_zones": d["state"].get("open_zones"),
+            "delay_remaining": d["state"].get("delay_remaining"),
+            "trouble": d["state"].get("trouble"),
+        }
+        for d in await _require_bridge().devices("security")
+    ]
 
 
 @mcp.tool()

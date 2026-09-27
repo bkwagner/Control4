@@ -61,9 +61,21 @@ uv run control4-mcp          # starts the MCP server over stdio
 - `list_items(category?)` — filter by `lights`, `comfort`, `thermostats`,
   `sensors`, `cameras`, `audio_video`, `motorization`, `motors`, …
 - `find_items(query)` — fuzzy name search
-- `list_lights(room?, only_on?)` — every light's level/state in one call, served
-  from an in-memory store kept current by Director events
+- `list_lights(room?, only_on?)` — every light's level/state in one call
+  (C4Bridge when configured, otherwise an in-memory store fed by Director events)
+- `list_thermostats(room?)`, `list_fans(room?)`, `set_fan(item_id, on?, speed?)`,
+  `list_blinds(room?)`, `set_blind(item_id, action?, position?)`,
+  `get_alarm_status()` (read-only) — require C4Bridge
 - `get_item_variables(item_id)` — current brightness, temp, power state, …
+
+**C4Bridge (optional).** With the [C4Bridge](https://github.com/IsraelCIL/C4Bridge)
+driver installed on the Director and `CONTROL4_C4BRIDGE_TOKEN` set, lights,
+thermostats, fans, blinds and alarm status go through it: no Control4 cloud
+login or 24-hour token is involved, and reads come from its in-memory state.
+`set_light_level`, `toggle_light` and `set_climate` use it for devices it
+supports and fall back to the Director for everything else (and whenever the
+bridge is unreachable); AV, rooms, variables and `send_command` always use the
+Director.
 
 **Control**
 - `set_light_level(item_id, level)` — 0–100
