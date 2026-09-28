@@ -3,16 +3,16 @@
 # sources. Everything else - including .env credentials, the Python server
 # and the desktop app - is never sent to EAS.
 /*
-!/control4-android/
+!/control4-android
 
 # Generated / local-only inside the app. Native folders are always
 # generated from app.json + config plugins by EAS prebuild.
-/control4-android/android/
-/control4-android/ios/
-/control4-android/node_modules/
-/control4-android/.expo/
-/control4-android/dist/
-/control4-android/web-build/
+/control4-android/android
+/control4-android/ios
+/control4-android/node_modules
+/control4-android/.expo
+/control4-android/dist
+/control4-android/web-build
 
 # Never upload secrets or binaries, wherever they are.
 **/.env
