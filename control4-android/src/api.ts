@@ -1,4 +1,3 @@
-import ReactNativeBlobUtil from 'react-native-blob-util';
 import { AppConfig, ItemVariable, Light, Room, BlindDevice, LockDevice, SecurityDevice, ClimateDevice } from './types';
 
 let directorIp: string | null = null;
@@ -26,16 +25,15 @@ class Control4API {
 
   private async request<T>(method: HttpMethod, path: string, body?: any, retried = false): Promise<T> {
     const url = `${this.baseURL}${path}`;
-    // TODO(cert pinning): `trusty` skips TLS verification for the director's
-    // self-signed cert. Replace with a pinned-cert native module.
-    const resp = await ReactNativeBlobUtil.config({ trusty: true }).fetch(
+    // The director's self-signed certificate is pinned by the native
+    // DirectorTrust (plugins/with-director-trust), so plain fetch works.
+    const resp = await fetch(url, {
       method,
-      url,
-      { 'Content-Type': 'application/json', ...this.headers },
-      body ? JSON.stringify(body) : undefined,
-    );
+      headers: { 'Content-Type': 'application/json', ...this.headers },
+      body: body ? JSON.stringify(body) : undefined,
+    });
 
-    const status = resp.info().status;
+    const status = resp.status;
     if (status === 401 && !retried && this.refreshToken) {
       const token = await this.refreshToken();
       if (token) {
@@ -45,10 +43,11 @@ class Control4API {
       }
     }
     if (status < 200 || status >= 300) {
-      const text = String(await resp.text());
+      const text = await resp.text();
       throw new Error(`${method} ${path} -> HTTP ${status}: ${text.slice(0, 200)}`);
     }
-    return resp.json() as T;
+    const text = await resp.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 
   async get<T>(path: string): Promise<T> {
@@ -113,6 +112,16 @@ function getParentMap(): Promise<Map<number, number>> {
     if (parentsCache === entry) parentsCache = null;
   });
   return map;
+}
+
+// Items whose displayed state can change when `itemId` reports an event: the
+// item itself plus its children (e.g. a blind proxy whose level is owned by
+// the motor driver that sends the event).
+export async function itemsAffectedBy(itemId: number): Promise<number[]> {
+  const parents = await getParentMap();
+  const ids = [itemId];
+  for (const [child, parent] of parents) if (parent === itemId) ids.push(child);
+  return ids;
 }
 
 // The named variables for each requested item, in two requests total
@@ -289,16 +298,17 @@ export async function setClimate(
     hvac_mode?: string;
   },
 ): Promise<void> {
-  const params: Record<string, any> = {};
-  if (payload.heat_setpoint_f !== undefined) params.HEAT_SETPOINT_F = payload.heat_setpoint_f;
-  if (payload.cool_setpoint_f !== undefined) params.COOL_SETPOINT_F = payload.cool_setpoint_f;
-  if (payload.hvac_mode !== undefined) params.HVAC_MODE = payload.hvac_mode;
-
-  await api.post(`/api/v1/items/${itemId}/commands`, {
-    async: true,
-    command: 'SET_CLIMATE',
-    tParams: params,
-  });
+  const send = (command: string, tParams: Record<string, unknown>) =>
+    api.post(`/api/v1/items/${itemId}/commands`, { async: true, command, tParams });
+  if (payload.heat_setpoint_f !== undefined) {
+    await send('SET_SETPOINT_HEAT', { FAHRENHEIT: payload.heat_setpoint_f });
+  }
+  if (payload.cool_setpoint_f !== undefined) {
+    await send('SET_SETPOINT_COOL', { FAHRENHEIT: payload.cool_setpoint_f });
+  }
+  if (payload.hvac_mode !== undefined) {
+    await send('SET_MODE_HVAC', { MODE: payload.hvac_mode });
+  }
 }
 
 // Fast variant: categorize a single room's devices in one round trip of list
@@ -381,6 +391,7 @@ export const apiClient = {
   getItemVariables,
   getVariablesByName,
   getVariablesForItems,
+  itemsAffectedBy,
   setLightLevel,
   setBlindLevel,
   openBlind,

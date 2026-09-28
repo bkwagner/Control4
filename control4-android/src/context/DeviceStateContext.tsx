@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
-import ReactNativeBlobUtil from 'react-native-blob-util';
+import io from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { apiClient } from '../api';
 import { ItemVariable } from '../types';
@@ -39,7 +38,6 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
   const [states, setStates] = useState<Map<number, ItemVariable[]>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
 
   const refreshItem = useCallback(async (itemId: number) => {
     try {
@@ -84,108 +82,81 @@ export function DeviceStateProvider({ children }: { children: React.ReactNode })
     }
   }, [refreshItem]);
 
-  // WebSocket connection setup
+  // Live updates from the director's event feed. The director speaks the
+  // legacy Socket.IO v2 protocol (so socket.io-client 2.x), on the ROOT
+  // namespace: connect -> director emits `clientId` -> GET a subscriptionId
+  // for it -> emit `startSubscription` -> item events arrive as events named
+  // after the subscriptionId. TLS to the director's self-signed cert is
+  // pinned natively (plugins/with-director-trust), which is what lets React
+  // Native's WebSocket connect at all.
   useEffect(() => {
     if (!config) return;
+    const { directorIp, directorToken } = config;
 
-    try {
-      console.log('Connecting to WebSocket:', `wss://${config.directorIp}/api/v1/items/datatoui`);
-      const newSocket = io(`wss://${config.directorIp}/api/v1/items/datatoui`, {
-        auth: { token: config.directorToken },
-        query: { JWT: config.directorToken },
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        reconnectionAttempts: 10,
-        rejectUnauthorized: false,
-        forceNew: true,
-      } as any);
+    const socket = io(`wss://${directorIp}`, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+      forceNew: true,
+      // engine.io-client 3 passes these to React Native's WebSocket.
+      ...({ extraHeaders: { JWT: directorToken } } as object),
+    });
+    let subscriptionId: string | null = null;
+    let closed = false;
 
-      let subscriptionId: string | null = null;
-
-      newSocket.on('clientId', async (clientId: string) => {
-        console.log('Received clientId:', clientId);
-        newSocket.emit('2probe');
-
-        try {
-          const params = new URLSearchParams({
-            JWT: config.directorToken,
-            SubscriptionClient: clientId,
-          });
-          const url = `https://${config.directorIp}/api/v1/items/datatoui?${params}`;
-
-          console.log('Fetching subscription ID from:', url);
-          const resp = await ReactNativeBlobUtil.config({ trusty: true }).fetch(
-            'GET',
-            url,
-            { 'Accept': 'application/json' },
-          );
-
-          const status = resp.info().status;
-          if (status < 200 || status >= 300) {
-            throw new Error(`HTTP ${status}: ${resp.text()}`);
-          }
-
-          const data = resp.json() as { subscriptionId?: string };
-          console.log('Subscription response:', data);
-          if (data.subscriptionId) {
-            subscriptionId = data.subscriptionId;
-            newSocket.emit('startSubscription', subscriptionId);
-            console.log('Subscription started:', subscriptionId);
-          } else {
-            console.warn('No subscriptionId in response:', data);
-          }
-        } catch (e) {
-          console.error('Failed to get subscription ID:', e);
+    const onItemEvent = (message: unknown) => {
+      const msgs = Array.isArray(message) ? message : [message];
+      for (const m of msgs) {
+        if (!m || typeof m !== 'object') continue;
+        const msg = m as Record<string, unknown>;
+        if ('status' in msg) {
+          socket.emit('2');
+          continue;
         }
-      });
+        const itemId = msg['iddevice'];
+        if (typeof itemId !== 'number') continue;
+        // A motor/protocol driver may report changes shown on its proxy.
+        apiClient
+          .itemsAffectedBy(itemId)
+          .then((ids) => Promise.all(ids.map((id) => refreshItem(id))))
+          .catch(() => undefined);
+      }
+    };
 
-      newSocket.onAny((event: string, message: unknown) => {
-        if (subscriptionId && event === subscriptionId) {
-          const msgs = Array.isArray(message) ? message : [message];
-          for (const m of msgs) {
-            if (!m || typeof m !== 'object') continue;
-            const msg = m as Record<string, unknown>;
-            if ('status' in msg) {
-              newSocket.emit('2');
-              continue;
-            }
-            const itemId = msg['iddevice'];
-            if (typeof itemId === 'number') {
-              refreshItem(itemId).catch(console.error);
-            }
-          }
-        }
-      });
+    socket.on('disconnect', () => {
+      if (subscriptionId) socket.off(subscriptionId);
+      subscriptionId = null;
+    });
 
-      newSocket.on('connect', () => {
-        console.log('WebSocket connected to', config.directorIp);
-      });
+    socket.on('clientId', async (clientId: string) => {
+      socket.emit('2probe');
+      if (subscriptionId) return;
+      try {
+        const url =
+          `https://${directorIp}/api/v1/items/datatoui` +
+          `?JWT=${encodeURIComponent(directorToken)}` +
+          `&SubscriptionClient=${encodeURIComponent(clientId)}`;
+        const resp = await fetch(url, { headers: { Accept: 'application/json' } });
+        const data = (await resp.json()) as { subscriptionId?: string };
+        if (!data.subscriptionId) throw new Error(`no subscriptionId (HTTP ${resp.status})`);
+        if (closed) return;
+        subscriptionId = data.subscriptionId;
+        socket.on(subscriptionId, onItemEvent);
+        socket.emit('startSubscription', subscriptionId);
+      } catch (e) {
+        console.warn('[ws] subscription failed; retrying in 5s', e);
+        setTimeout(() => {
+          if (!closed) socket.disconnect().connect();
+        }, 5000);
+      }
+    });
 
-      newSocket.on('disconnect', (reason: string) => {
-        console.log('WebSocket disconnected:', reason);
-      });
-
-      newSocket.on('error', (error: any) => {
-        console.error('WebSocket error:', error, JSON.stringify(error));
-      });
-
-      newSocket.on('connect_error', (error: any) => {
-        console.error('WebSocket connect_error:', error?.message || error, error?.data);
-      });
-
-      setSocket(newSocket);
-
-      return () => {
-        try {
-          newSocket.disconnect();
-        } catch (e) {
-          console.error('Error disconnecting socket:', e);
-        }
-      };
-    } catch (e) {
-      console.error('Failed to setup WebSocket:', e);
-    }
+    return () => {
+      closed = true;
+      socket.removeAllListeners();
+      socket.close();
+    };
   }, [config, refreshItem]);
 
   return (

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, NativeModules } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { AppConfig } from '../types';
 import { apiClient } from '../api';
@@ -36,6 +36,17 @@ async function exchangeCredsForConfig(creds: AppCreds): Promise<AppConfig> {
     directorToken: directorToken.token,
     tokenExpiresAt: directorToken.expiresAt,
   };
+}
+
+// Signing in (or out) is the explicit "trust this Director" action: forget
+// the pinned certificate so a replaced controller can be trusted again.
+// No-op where the native module isn't present (e.g. Expo Go).
+async function clearDirectorPins(): Promise<void> {
+  try {
+    await NativeModules.DirectorTrust?.clearPins?.();
+  } catch {
+    // ignore - pins simply stay in place
+  }
 }
 
 function needsRefresh(c: AppConfig): boolean {
@@ -142,6 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const setConfig = async (creds: AppCreds) => {
     try {
       setError(null);
+      await clearDirectorPins();
       const full = await exchangeCredsForConfig(creds);
       await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(full));
       await applyConfig(full);
@@ -156,6 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await SecureStore.deleteItemAsync(STORE_KEY);
       await applyConfig(null);
+      await clearDirectorPins();
     } catch (e) {
       console.error('Failed to clear config:', e);
     }
