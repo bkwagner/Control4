@@ -68,10 +68,14 @@ class DirectorLinkClient:
         problem = data if isinstance(data, dict) else {}
         code = str(problem.get("code") or status)
         detail = str(problem.get("detail") or problem.get("title") or "request failed")
-        if status in (401, 403):
+        if status == 401:
             raise LinkUnavailable(
                 f"DirectorLink refused the API key ({code}); pair again and update CONTROL4_DIRECTORLINK_TOKEN"
             )
+        if code == "SEALED_REQUEST_REQUIRED":
+            # By design DirectorLink only answers this (alarm status) end-to-end
+            # encrypted via POST /v1/sealed; use the Director path instead.
+            raise LinkUnavailable(f"DirectorLink requires a sealed request: {detail}")
         # Unknown device / route, or the controller couldn't run the command.
         if status == 404 or status >= 500:
             raise LinkUnavailable(f"DirectorLink can't handle this: {code}: {detail}")

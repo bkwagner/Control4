@@ -463,28 +463,82 @@ async def set_blind(item_id: int, action: str | None = None, position: int | Non
     return "no-op: pass action or position"
 
 
+_PARTITION_VARS = (
+    "IS_ACTIVE", "PARTITION_STATE", "HOME_STATE", "AWAY_STATE", "ALARM_STATE",
+    "ALARM_TYPE", "ARMED_TYPE", "OPEN_ZONE_COUNT", "DELAY_TIME_REMAINING", "TROUBLE_TEXT",
+)
+
+
+async def _director_alarm_status() -> list[dict[str, Any]]:
+    """Alarm partitions read straight from the Director (TLS), for when
+    DirectorLink won't answer in the clear."""
+    director = await _conn.director()
+    partitions = {
+        it["id"]: it for it in await director.get_all_item_info()
+        if it.get("proxy") == "security" and isinstance(it.get("id"), int)
+    }
+    values: dict[int, dict[str, Any]] = {}
+    for row in await director.get_all_item_variable_value(list(_PARTITION_VARS)):
+        if row.get("id") in partitions:
+            values.setdefault(row["id"], {})[row.get("varName")] = row.get("value")
+
+    def flag(v: Any) -> bool:
+        return str(v).strip().lower() in ("1", "true")
+
+    def text(v: Any) -> str | None:
+        return str(v) if v not in (None, "", "Undefined") else None
+
+    out = []
+    for pid, v in values.items():
+        if "IS_ACTIVE" in v and not flag(v["IS_ACTIVE"]):
+            continue  # unused partition
+        home, away = flag(v.get("HOME_STATE")), flag(v.get("AWAY_STATE"))
+        remaining = v.get("DELAY_TIME_REMAINING")
+        out.append({
+            "id": pid,
+            "name": partitions[pid].get("name"),
+            "state": text(v.get("PARTITION_STATE")),
+            "armed": home or away,
+            "armed_mode": "away" if away else ("home" if home else None),
+            "alarm": flag(v.get("ALARM_STATE")),
+            "open_zones": v.get("OPEN_ZONE_COUNT"),
+            "delay": {"remaining": remaining} if remaining not in (None, 0, "0") else None,
+            "trouble": text(v.get("TROUBLE_TEXT")),
+            "source": "director",
+        })
+    return out
+
+
 @mcp.tool()
 async def get_alarm_status() -> list[dict[str, Any]]:
     """Read-only security system status per partition: armed/disarmed, alarm,
     open zones, entry/exit delay, trouble. Arming/disarming is not available.
-    Requires DirectorLink with its "Alarm Status" property turned on."""
-    data = await _require_link().alarm()
-    if not data.get("enabled"):
-        raise RuntimeError('Alarm status is off in DirectorLink (Composer property "Alarm Status").')
-    return [
-        {
-            "id": p.get("id"),
-            "name": p.get("name"),
-            "state": p.get("state"),
-            "armed": p.get("armed"),
-            "armed_mode": p.get("armed_mode"),
-            "alarm": p.get("alarm"),
-            "open_zones": p.get("open_zones"),
-            "delay": p.get("delay"),
-            "trouble": p.get("trouble"),
-        }
-        for p in data.get("partitions") or []
-    ]
+
+    DirectorLink only reveals alarm status in end-to-end sealed responses, so
+    this normally reads the partitions from the Director over TLS instead.
+    """
+    if _link is not None:
+        try:
+            data = await _link.alarm()
+            if data.get("enabled"):
+                return [
+                    {
+                        "id": p.get("id"),
+                        "name": p.get("name"),
+                        "state": p.get("state"),
+                        "armed": p.get("armed"),
+                        "armed_mode": p.get("armed_mode"),
+                        "alarm": p.get("alarm"),
+                        "open_zones": p.get("open_zones"),
+                        "delay": p.get("delay"),
+                        "trouble": p.get("trouble"),
+                        "source": "directorlink",
+                    }
+                    for p in data.get("partitions") or []
+                ]
+        except LinkUnavailable as e:
+            log.info("get_alarm_status: %s; using Director", e)
+    return await _director_alarm_status()
 
 
 @mcp.tool()
