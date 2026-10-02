@@ -82,8 +82,11 @@ class DirectorLinkClient:
         if kind not in KINDS:
             raise ValueError(kind)
         data = await self._request("GET", f"/v1/{kind}")
-        items = (data or {}).get("items")
-        return items if isinstance(items, list) else []
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            # Not the DirectorLink API (e.g. a pre-rename C4Bridge build).
+            raise LinkUnavailable(f"unexpected /v1/{kind} response from DirectorLink")
+        return items
 
     async def get(self, kind: str, item_id: int) -> dict[str, Any]:
         return await self._request("GET", f"/v1/{kind}/{item_id}") or {}
